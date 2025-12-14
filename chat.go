@@ -3,6 +3,7 @@ package goaitools
 import (
 	"context"
 	"fmt"
+
 	"github.com/m0rjc/goaitools/aitooling"
 )
 
@@ -11,7 +12,7 @@ type Chat struct {
 	MaxToolIterations int              // Default max iterations for tool-calling loop (0 = use default 10)
 	SystemLogger      SystemLogger     // Optional logger for system/debug logging
 	ToolActionLogger  aitooling.Logger // Optional default logger for tool actions
-	LogToolArguments  bool             // If true, log tool call arguments at DEBUG level
+	LogToolArguments  bool             // If true, log tool call arguments and responses at DEBUG level
 }
 
 type chatRequest struct {
@@ -191,6 +192,17 @@ func (c *Chat) executeTools(ctx context.Context, iteration int, toolCalls []Tool
 			resultContent = result.Result
 		}
 
+		// Optionally log tool response for debugging
+		if c.LogToolArguments {
+			c.logDebug(ctx, "tool_response",
+				"iteration", iteration,
+				"tool_call_index", idx,
+				"tool_name", call.Name,
+				"tool_id", call.ID,
+				"response", resultContent,
+			)
+		}
+
 		toolMessages = append(toolMessages, Message{
 			Role:       RoleTool,
 			Content:    resultContent,
@@ -224,10 +236,10 @@ func (c *Chat) logError(ctx context.Context, msg string, err error, keysAndValue
 
 type dummyLogger struct{}
 
-func (d dummyLogger) Log(action aitooling.ToolAction) {
+func (d dummyLogger) Log(_ aitooling.ToolAction) {
 	// Do Nothing
 }
 
-func (d dummyLogger) LogAll(actions []aitooling.ToolAction) {
+func (d dummyLogger) LogAll(_ []aitooling.ToolAction) {
 	// Do Nothing
 }
