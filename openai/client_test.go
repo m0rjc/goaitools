@@ -140,7 +140,7 @@ func TestConvertToolCallsToOpenAI(t *testing.T) {
 		{
 			ID:        "call_abc123",
 			Name:      "get_weather",
-			Arguments: json.RawMessage(`{"location":"London"}`),
+			Arguments: `{"location":"London"}`,
 		},
 	}
 
@@ -165,7 +165,7 @@ func TestConvertToolCallsToOpenAI(t *testing.T) {
 	}
 
 	var args map[string]string
-	json.Unmarshal(call.Function.Arguments, &args)
+	json.Unmarshal([]byte(call.Function.Arguments), &args)
 	if args["location"] != "London" {
 		t.Error("Arguments not preserved")
 	}
@@ -179,7 +179,7 @@ func TestConvertToolCallsFromOpenAI(t *testing.T) {
 			Type: "function",
 			Function: FunctionCall{
 				Name:      "check_status",
-				Arguments: json.RawMessage(`{"id":42}`),
+				Arguments: `{"id":42}`,
 			},
 		},
 	}
@@ -201,7 +201,7 @@ func TestConvertToolCallsFromOpenAI(t *testing.T) {
 	}
 
 	var args map[string]int
-	json.Unmarshal(call.Arguments, &args)
+	json.Unmarshal([]byte(call.Arguments), &args)
 	if args["id"] != 42 {
 		t.Error("Arguments not preserved")
 	}

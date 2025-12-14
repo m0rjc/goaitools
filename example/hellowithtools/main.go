@@ -67,9 +67,9 @@ func main() {
 	}
 
 	for i, op := range testOperations {
-		fmt.Printf("\n" + strings.Repeat("=", 80) + "\n")
+		fmt.Printf("\n%s\n", strings.Repeat("=", 80))
 		fmt.Printf("Operation %d: %s\n", i+1, op.name)
-		fmt.Printf(strings.Repeat("=", 80) + "\n")
+		fmt.Printf("%s\n", strings.Repeat("=", 80))
 		fmt.Printf("USER: %s\n\n", op.message)
 
 		response, err := chat.Chat(ctx,
@@ -88,12 +88,12 @@ func main() {
 	}
 
 	// Print final game state
-	fmt.Printf("\n" + strings.Repeat("=", 80) + "\n")
+	fmt.Printf("\n%s\n", strings.Repeat("=", 80))
 	fmt.Printf("FINAL GAME STATE\n")
-	fmt.Printf(strings.Repeat("=", 80) + "\n")
+	fmt.Printf("%s\n", strings.Repeat("=", 80))
 	fmt.Printf("Title:            %s\n", game.Title)
 	fmt.Printf("Start Date:       %s\n", game.StartDate.Format("2006-01-02 15:04:05 MST"))
 	fmt.Printf("Duration:         %d minutes\n", game.DurationMinutes)
 	fmt.Printf("Grid Dimensions:  %d x %d (M x N)\n", game.GridM, game.GridN)
-	fmt.Printf(strings.Repeat("=", 80) + "\n")
+	fmt.Printf("%s\n", strings.Repeat("=", 80))
 }

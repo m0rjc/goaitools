@@ -109,7 +109,7 @@ func TestChat_ToolCallingLoop(t *testing.T) {
 							{
 								ID:        "call_123",
 								Name:      "test_tool",
-								Arguments: json.RawMessage(`{}`),
+								Arguments: `{}`,
 							},
 						},
 					},
@@ -170,7 +170,7 @@ func TestChat_MaxIterationsPreventsInfiniteLoop(t *testing.T) {
 				Message: Message{
 					Role: RoleAssistant,
 					ToolCalls: []ToolCall{
-						{ID: "call_1", Name: "test_tool", Arguments: json.RawMessage(`{}`)},
+						{ID: "call_1", Name: "test_tool", Arguments: `{}`},
 					},
 				},
 				FinishReason: FinishReasonToolCalls,
@@ -214,7 +214,7 @@ func TestChat_WithMaxToolIterations_OverridesDefault(t *testing.T) {
 				Message: Message{
 					Role: RoleAssistant,
 					ToolCalls: []ToolCall{
-						{ID: "call_1", Name: "test_tool", Arguments: json.RawMessage(`{}`)},
+						{ID: "call_1", Name: "test_tool", Arguments: `{}`},
 					},
 				},
 				FinishReason: FinishReasonToolCalls,
@@ -312,7 +312,7 @@ func TestChat_ToolActionLogger_ReceivesActions(t *testing.T) {
 					Message: Message{
 						Role: RoleAssistant,
 						ToolCalls: []ToolCall{
-							{ID: "call_1", Name: "logging_tool", Arguments: json.RawMessage(`{}`)},
+							{ID: "call_1", Name: "logging_tool", Arguments: `{}`},
 						},
 					},
 					FinishReason: FinishReasonToolCalls,
@@ -376,7 +376,7 @@ func TestChat_DefaultMaxIterations(t *testing.T) {
 				Message: Message{
 					Role: RoleAssistant,
 					ToolCalls: []ToolCall{
-						{ID: "call_1", Name: "test_tool", Arguments: json.RawMessage(`{}`)},
+						{ID: "call_1", Name: "test_tool", Arguments: `{}`},
 					},
 				},
 				FinishReason: FinishReasonToolCalls,
@@ -418,7 +418,7 @@ func TestChat_LogToolArguments_EnablesArgumentLogging(t *testing.T) {
 					Message: Message{
 						Role: RoleAssistant,
 						ToolCalls: []ToolCall{
-							{ID: "call_1", Name: "test_tool", Arguments: json.RawMessage(`{"arg":"value"}`)},
+							{ID: "call_1", Name: "test_tool", Arguments: `{"arg":"value"}`},
 						},
 					},
 					FinishReason: FinishReasonToolCalls,
@@ -501,7 +501,7 @@ func TestChat_LogToolArguments_Disabled_DoesNotLogArguments(t *testing.T) {
 					Message: Message{
 						Role: RoleAssistant,
 						ToolCalls: []ToolCall{
-							{ID: "call_1", Name: "test_tool", Arguments: json.RawMessage(`{"arg":"value"}`)},
+							{ID: "call_1", Name: "test_tool", Arguments: `{"arg":"value"}`},
 						},
 					},
 					FinishReason: FinishReasonToolCalls,
