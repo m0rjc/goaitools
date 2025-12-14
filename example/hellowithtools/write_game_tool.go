@@ -73,7 +73,7 @@ func (t *WriteGameTool) Parameters() json.RawMessage {
 //  4. Flush the accumulated action log
 func (t *WriteGameTool) Execute(ctx aitooling.ToolExecuteContext, req *aitooling.ToolRequest) (*aitooling.ToolResult, error) {
 	var params map[string]interface{}
-	if err := json.Unmarshal(req.Args, &params); err != nil {
+	if err := json.Unmarshal([]byte(req.Args), &params); err != nil {
 		return req.NewErrorResult(fmt.Errorf("invalid parameters: %w", err)), nil
 	}
 

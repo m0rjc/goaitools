@@ -44,8 +44,8 @@ type ToolCall struct {
 
 // FunctionCall represents the function being called.
 type FunctionCall struct {
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"` // JSON arguments
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"` // JSON arguments
 }
 
 // ChatCompletionResponse represents the API response.
