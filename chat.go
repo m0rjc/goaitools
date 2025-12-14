@@ -3,6 +3,7 @@ package goaitools
 import (
 	"context"
 	"fmt"
+
 	"github.com/m0rjc/goaitools/aitooling"
 )
 
@@ -11,6 +12,7 @@ type Chat struct {
 	MaxToolIterations int              // Default max iterations for tool-calling loop (0 = use default 10)
 	SystemLogger      SystemLogger     // Optional logger for system/debug logging
 	ToolActionLogger  aitooling.Logger // Optional default logger for tool actions
+	LogToolArguments  bool             // If true, log tool call arguments and responses at DEBUG level
 }
 
 type chatRequest struct {
@@ -112,10 +114,10 @@ func (c *Chat) Chat(ctx context.Context, opts ...ChatOption) (string, error) {
 
 		case FinishReasonToolCalls:
 			// Execute tools and continue loop
-			c.logDebug(ctx, "executing_tools", "count", len(response.Message.ToolCalls))
-			toolResults, err := c.executeTools(ctx, response.Message.ToolCalls, request.tools, toolLogger)
+			c.logDebug(ctx, "executing_tools", "iteration", iteration, "count", len(response.Message.ToolCalls))
+			toolResults, err := c.executeTools(ctx, iteration, response.Message.ToolCalls, request.tools, toolLogger)
 			if err != nil {
-				c.logError(ctx, "tool_execution_failed", err)
+				c.logError(ctx, "tool_execution_failed", err, "iteration", iteration)
 				return "", err
 			}
 			messages = append(messages, toolResults...)
@@ -148,11 +150,27 @@ func (c *Chat) resolveMaxIterations(override *int) int {
 }
 
 // executeTools executes tool calls and returns tool result messages.
-func (c *Chat) executeTools(ctx context.Context, toolCalls []ToolCall, tools aitooling.ToolSet, logger aitooling.Logger) ([]Message, error) {
+func (c *Chat) executeTools(ctx context.Context, iteration int, toolCalls []ToolCall, tools aitooling.ToolSet, logger aitooling.Logger) ([]Message, error) {
 	runner := tools.Runner(ctx, logger)
 
 	var toolMessages []Message
-	for _, call := range toolCalls {
+	for idx, call := range toolCalls {
+		// Log tool call execution at DEBUG level
+		logFields := []interface{}{
+			"iteration", iteration,
+			"tool_call_index", idx,
+			"tool_calls_count", len(toolCalls),
+			"tool_name", call.Name,
+			"tool_id", call.ID,
+		}
+
+		// Optionally include arguments for debugging
+		if c.LogToolArguments {
+			logFields = append(logFields, "tool_args", string(call.Arguments))
+		}
+
+		c.logDebug(ctx, "executing_tool_call", logFields...)
+
 		toolRequest := aitooling.ToolRequest{
 			Name:   call.Name,
 			Args:   call.Arguments,
@@ -166,11 +184,23 @@ func (c *Chat) executeTools(ctx context.Context, toolCalls []ToolCall, tools ait
 			// Unexpected error (infrastructure failure, not domain error)
 			resultContent = fmt.Sprintf("Error: %v", err)
 			c.logError(ctx, "tool_execution_error", err,
+				"iteration", iteration,
 				"tool_name", call.Name,
 				"tool_id", call.ID,
 			)
 		} else {
 			resultContent = result.Result
+		}
+
+		// Optionally log tool response for debugging
+		if c.LogToolArguments {
+			c.logDebug(ctx, "tool_response",
+				"iteration", iteration,
+				"tool_call_index", idx,
+				"tool_name", call.Name,
+				"tool_id", call.ID,
+				"response", resultContent,
+			)
 		}
 
 		toolMessages = append(toolMessages, Message{
@@ -190,6 +220,13 @@ func (c *Chat) logDebug(ctx context.Context, msg string, keysAndValues ...interf
 	}
 }
 
+// logInfo logs an info message if a SystemLogger is configured.
+func (c *Chat) logInfo(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	if c.SystemLogger != nil {
+		c.SystemLogger.Info(ctx, msg, keysAndValues...)
+	}
+}
+
 // logError logs an error message if a SystemLogger is configured.
 func (c *Chat) logError(ctx context.Context, msg string, err error, keysAndValues ...interface{}) {
 	if c.SystemLogger != nil {
@@ -199,10 +236,10 @@ func (c *Chat) logError(ctx context.Context, msg string, err error, keysAndValue
 
 type dummyLogger struct{}
 
-func (d dummyLogger) Log(action aitooling.ToolAction) {
+func (d dummyLogger) Log(_ aitooling.ToolAction) {
 	// Do Nothing
 }
 
-func (d dummyLogger) LogAll(actions []aitooling.ToolAction) {
+func (d dummyLogger) LogAll(_ []aitooling.ToolAction) {
 	// Do Nothing
 }

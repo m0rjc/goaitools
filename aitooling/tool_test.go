@@ -47,7 +47,7 @@ func TestToolRequest_NewResult_PreservesCallId(t *testing.T) {
 	req := &ToolRequest{
 		Name:   "test_tool",
 		CallId: "call_12345",
-		Args:   json.RawMessage(`{}`),
+		Args:   `{}`,
 	}
 
 	result := req.NewResult("operation successful")
@@ -66,7 +66,7 @@ func TestToolRequest_NewErrorResult_FormatsError(t *testing.T) {
 	req := &ToolRequest{
 		Name:   "test_tool",
 		CallId: "call_12345",
-		Args:   json.RawMessage(`{}`),
+		Args:   `{}`,
 	}
 
 	testErr := errors.New("something went wrong")
@@ -110,7 +110,7 @@ func TestToolSet_Runner_FindsToolByName(t *testing.T) {
 	result, err := runner(&ToolRequest{
 		Name:   "tool_b",
 		CallId: "call_1",
-		Args:   json.RawMessage(`{}`),
+		Args:   `{}`,
 	})
 
 	if err != nil {
@@ -138,7 +138,7 @@ func TestToolSet_Runner_UnknownTool_ReturnsErrorResult(t *testing.T) {
 	result, err := runner(&ToolRequest{
 		Name:   "nonexistent_tool",
 		CallId: "call_1",
-		Args:   json.RawMessage(`{}`),
+		Args:   `{}`,
 	})
 
 	// Should return error result, NOT an error
@@ -176,7 +176,7 @@ func TestToolSet_Runner_ProvidesLoggerToTools(t *testing.T) {
 	runner(&ToolRequest{
 		Name:   "test_tool",
 		CallId: "call_1",
-		Args:   json.RawMessage(`{}`),
+		Args:   `{}`,
 	})
 
 	if receivedLogger != logger {
@@ -207,7 +207,7 @@ func TestToolSet_Runner_ProvidesContextToTools(t *testing.T) {
 	runner(&ToolRequest{
 		Name:   "test_tool",
 		CallId: "call_1",
-		Args:   json.RawMessage(`{}`),
+		Args:   `{}`,
 	})
 
 	if receivedContext != ctx {
@@ -234,7 +234,7 @@ func TestToolSet_Runner_PropagatesInfrastructureErrors(t *testing.T) {
 	result, err := runner(&ToolRequest{
 		Name:   "failing_tool",
 		CallId: "call_1",
-		Args:   json.RawMessage(`{}`),
+		Args:   `{}`,
 	})
 
 	// Infrastructure errors should be propagated
@@ -267,7 +267,7 @@ func TestToolSet_Runner_DomainErrorsReturnedAsResults(t *testing.T) {
 	result, err := runner(&ToolRequest{
 		Name:   "business_tool",
 		CallId: "call_1",
-		Args:   json.RawMessage(`{}`),
+		Args:   `{}`,
 	})
 
 	// No infrastructure error
@@ -296,7 +296,7 @@ func TestToolSet_Runner_EmptyToolSet(t *testing.T) {
 	result, err := runner(&ToolRequest{
 		Name:   "any_tool",
 		CallId: "call_1",
-		Args:   json.RawMessage(`{}`),
+		Args:   `{}`,
 	})
 
 	if err != nil {

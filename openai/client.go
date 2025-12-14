@@ -143,9 +143,12 @@ func (c *Client) ChatCompletion(
 	}
 
 	choice := resp.Choices[0]
-	c.logSystemDebug(ctx, "openai_request_complete",
+	c.logSystemDebug(ctx, "openai_response",
 		"finish_reason", choice.FinishReason,
 		"tool_calls_count", len(choice.Message.ToolCalls),
+		"prompt_tokens", resp.Usage.PromptTokens,
+		"completion_tokens", resp.Usage.CompletionTokens,
+		"total_tokens", resp.Usage.TotalTokens,
 	)
 
 	// Convert OpenAI message back to goaitools.Message

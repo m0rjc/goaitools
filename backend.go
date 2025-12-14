@@ -2,7 +2,6 @@ package goaitools
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/m0rjc/goaitools/aitooling"
 )
@@ -38,9 +37,9 @@ type Message struct {
 // This is a provider-agnostic representation - provider-specific fields
 // (like OpenAI's "type") are handled by the backend implementation.
 type ToolCall struct {
-	ID        string          `json:"id"`        // Unique identifier for this call
-	Name      string          `json:"name"`      // Name of the function to call
-	Arguments json.RawMessage `json:"arguments"` // JSON arguments for the function
+	ID        string `json:"id"`        // Unique identifier for this call
+	Name      string `json:"name"`      // Name of the function to call
+	Arguments string `json:"arguments"` // JSON arguments for the function
 }
 
 // ChatResponse represents a single API response from a chat completion.

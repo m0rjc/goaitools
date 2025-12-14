@@ -1,0 +1,5 @@
+# Env file containing the developer's OpenAI Key
+.env
+
+# Compiled output
+hellowithtools

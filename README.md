@@ -58,121 +58,7 @@ go get github.com/m0rjc/goaitools
 
 ## Quick Start
 
-### Simple Chat Completion
-
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "log"
-
-    "github.com/m0rjc/goaitools"
-    "github.com/m0rjc/goaitools/openai"
-)
-
-func main() {
-    // Create OpenAI client
-    client := openai.NewClient("your-api-key")
-    if client == nil {
-        log.Fatal("Failed to create OpenAI client")
-    }
-
-    // Create chat instance
-    chat := &goaitools.Chat{Backend: client}
-
-    // Send a simple message
-    response, err := chat.Chat(
-        context.Background(),
-        goaitools.WithSystemMessage("You are a helpful assistant."),
-        goaitools.WithUserMessage("What is the capital of France?"),
-    )
-
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    fmt.Println(response)
-}
-```
-
-### Chat with Tools
-
-```go
-package main
-
-import (
-    "context"
-    "encoding/json"
-    "fmt"
-
-    "github.com/m0rjc/goaitools"
-    "github.com/m0rjc/goaitools/aitooling"
-    "github.com/m0rjc/goaitools/openai"
-)
-
-// Define a simple tool
-type WeatherTool struct{}
-
-func (t *WeatherTool) Name() string {
-    return "get_weather"
-}
-
-func (t *WeatherTool) Description() string {
-    return "Get the current weather for a location"
-}
-
-func (t *WeatherTool) Parameters() json.RawMessage {
-    schema := map[string]interface{}{
-        "type": "object",
-        "properties": map[string]interface{}{
-            "location": map[string]interface{}{
-                "type":        "string",
-                "description": "The city name",
-            },
-        },
-        "required": []string{"location"},
-    }
-    return aitooling.MustMarshalJSON(schema)
-}
-
-func (t *WeatherTool) Execute(ctx aitooling.ToolExecuteContext, req *aitooling.ToolRequest) (*aitooling.ToolResult, error) {
-    // Parse arguments
-    var args struct {
-        Location string `json:"location"`
-    }
-    if err := json.Unmarshal(req.Args, &args); err != nil {
-        return req.NewErrorResult(err), nil
-    }
-
-    // Simulate weather lookup
-    result := fmt.Sprintf("The weather in %s is sunny and 72°F", args.Location)
-    return req.NewResult(result), nil
-}
-
-func main() {
-    client := openai.NewClient("your-api-key")
-    chat := &goaitools.Chat{Backend: client}
-
-    // Create tools
-    tools := aitooling.ToolSet{&WeatherTool{}}
-
-    // Chat with tools
-    response, err := chat.Chat(
-        context.Background(),
-        goaitools.WithSystemMessage("You are a helpful weather assistant."),
-        goaitools.WithUserMessage("What's the weather in Paris?"),
-        goaitools.WithTools(tools),
-    )
-
-    if err != nil {
-        panic(err)
-    }
-
-    fmt.Println(response)
-}
-```
+See the examples in the examples directory in this project.
 
 ### Configuring System Logging
 
@@ -348,6 +234,11 @@ client := openai.NewClientWithOptions(
 
 ### Graceful Degradation
 
+The project that created this package had a graceful degradation pattern should an OpenAI key
+not be defined. That remains in this codebase, however I'd recommend that client code is responsible
+for this behaviour. Ideally I'd plan to remove this feature and have NewClient() return an error
+if the key is missing.
+
 ```go
 // Client returns nil if API key is empty
 client := openai.NewClient("")
@@ -391,76 +282,6 @@ for _, action := range actionLogs {
 }
 ```
 
-## Advanced Patterns
-
-### Custom Backend
-
-Implement the `Backend` interface to support other AI providers:
-
-```go
-type MyBackend struct {
-    // ... your implementation
-}
-
-func (b *MyBackend) ChatCompletionWithTools(
-    ctx context.Context,
-    messages []goaitools.Message,
-    tools aitooling.ToolSet,
-    logger aitooling.Logger,
-) (*goaitools.ChatResult, error) {
-    // ... your implementation
-}
-
-// Use it
-chat := &goaitools.Chat{Backend: &MyBackend{}}
-```
-
-### Application-Specific Tool Context
-
-Pass application context through to tools:
-
-```go
-executeContext := aitooling.ToolExecuteContext{
-    Context:     ctx,                // Go context
-    ToolContext: myAppContext,       // Your application context
-    Logger:      logger,
-}
-
-// In your tool's Execute method:
-appCtx := ctx.ToolContext.(*MyAppContext)
-// Use appCtx.Database, appCtx.RequestInfo, etc.
-```
-
-## Testing
-
-The library is designed for easy testing:
-
-```go
-// Mock backend for testing
-type MockBackend struct {
-    Response string
-}
-
-func (m *MockBackend) ChatCompletionWithTools(...) (*goaitools.ChatResult, error) {
-    return &goaitools.ChatResult{Content: m.Response}, nil
-}
-
-// Test with mock
-chat := &goaitools.Chat{Backend: &MockBackend{Response: "test response"}}
-```
-
-## Error Handling
-
-The library follows Go best practices:
-
-- **Graceful degradation**: Returns nil for invalid configuration
-- **Error wrapping**: Preserves error chains with `fmt.Errorf("%w")`
-- **Context propagation**: Respects context cancellation and deadlines
-
-## Related Projects
-
-- [gowhatsapp](../gowhatsapp) - WhatsApp Cloud API integration
-- Production usage: See MiniMonopoly game implementation in `src/webhook/routes/*/aitools/`
 
 ## License
 
