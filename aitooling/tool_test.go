@@ -15,9 +15,9 @@ type mockTool struct {
 	executeFunc func(ctx ToolExecuteContext, req *ToolRequest) (*ToolResult, error)
 }
 
-func (m *mockTool) Name() string                 { return m.name }
-func (m *mockTool) Description() string          { return m.description }
-func (m *mockTool) Parameters() json.RawMessage  { return m.parameters }
+func (m *mockTool) Name() string                { return m.name }
+func (m *mockTool) Description() string         { return m.description }
+func (m *mockTool) Parameters() json.RawMessage { return m.parameters }
 func (m *mockTool) Execute(ctx ToolExecuteContext, req *ToolRequest) (*ToolResult, error) {
 	if m.executeFunc != nil {
 		return m.executeFunc(ctx, req)

@@ -11,7 +11,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Key Design Principles:**
 - Backend abstraction: Interface-based design supports multiple AI providers
 - Minimal dependencies: Only uses Go standard library
-- Graceful degradation: Returns nil for invalid configuration (e.g., empty API key)
 
 ## Technology Stack
 
@@ -145,19 +144,6 @@ The `Chat` type provides functional options pattern for easy usage. See `example
 
 See `example/hellowithtools/write_game_tool.go:Parameters()` for a complete example of defining JSON Schema for tool parameters.
 
-### Graceful Degradation Pattern
-
-```go
-// Client returns nil if API key is empty
-client := openai.NewClient("")
-if client == nil {
-    // AI features disabled - fall back to alternative behavior
-    return handleWithoutAI()
-}
-```
-
-**When implementing features**: Always check for nil client and provide fallback behavior.
-
 ### Logging Abstraction
 
 The OpenAI client uses a `Logger` interface (different from `aitooling.Logger`):
@@ -188,16 +174,23 @@ See `example/hellowithtools/write_game_tool.go:Execute()` for examples of all th
 
 ```go
 // Simple (uses defaults: gpt-4o-mini, 30s timeout)
-client := openai.NewClient(apiKey)
+client, err := openai.NewClient(apiKey)
+if err != nil {
+    // Handle error (e.g., missing API key)
+    return err
+}
 
 // With custom options
-client := openai.NewClientWithOptions(
+client, err := openai.NewClientWithOptions(
     apiKey,
     openai.WithModel("gpt-4"),
     openai.WithBaseURL("https://custom-endpoint.com"),
-    openai.WithLogger(customLogger),
+    openai.WithSystemLogger(customLogger),
     openai.WithHTTPClient(customHTTPClient),
 )
+if err != nil {
+    return err
+}
 ```
 
 **Default Configuration**:

@@ -39,9 +39,9 @@ func main() {
 	}
 
 	// Create OpenAI client and chat
-	client := openai.NewClient(apiKey)
-	if client == nil {
-		log.Fatal("Failed to create OpenAI client")
+	client, err := openai.NewClient(apiKey)
+	if err != nil {
+		log.Fatalf("Failed to create OpenAI client: %v", err)
 	}
 
 	chat := &goaitools.Chat{

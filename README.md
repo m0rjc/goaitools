@@ -82,7 +82,10 @@ func main() {
         Level: slog.LevelDebug,
     })))
 
-    client := openai.NewClient("your-api-key")
+    client, err := openai.NewClient("your-api-key")
+    if err != nil {
+        log.Fatal(err)
+    }
 
     // Create chat with system logger
     chat := &goaitools.Chat{
@@ -223,27 +226,15 @@ response, err := chat.Chat(
 ### OpenAI Client Options
 
 ```go
-client := openai.NewClientWithOptions(
+client, err := openai.NewClientWithOptions(
     apiKey,
     openai.WithModel("gpt-4"),
     openai.WithBaseURL("https://custom-endpoint.com"),
     openai.WithSystemLogger(goaitools.NewSlogSystemLogger()),
     openai.WithHTTPClient(customHTTPClient),
 )
-```
-
-### Graceful Degradation
-
-The project that created this package had a graceful degradation pattern should an OpenAI key
-not be defined. That remains in this codebase, however I'd recommend that client code is responsible
-for this behaviour. Ideally I'd plan to remove this feature and have NewClient() return an error
-if the key is missing.
-
-```go
-// Client returns nil if API key is empty
-client := openai.NewClient("")
-if client == nil {
-    // AI features disabled - fall back to alternative behavior
+if err != nil {
+    log.Fatal(err)
 }
 ```
 
