@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,9 @@ const (
 	defaultTimeout = 30 * time.Second
 )
 
+// ErrMissingAPIKey is returned when attempting to create a client with an empty API key.
+var ErrMissingAPIKey = errors.New("API key is required")
+
 // Client is an OpenAI API client.
 type Client struct {
 	apiKey       string
@@ -29,10 +33,10 @@ type Client struct {
 }
 
 // NewClient creates a new OpenAI client with the given API key.
-// If apiKey is empty, returns nil (AI features should gracefully degrade).
-func NewClient(apiKey string) *Client {
+// Returns ErrMissingAPIKey if apiKey is empty.
+func NewClient(apiKey string) (*Client, error) {
 	if apiKey == "" {
-		return nil
+		return nil, ErrMissingAPIKey
 	}
 
 	return &Client{
@@ -42,7 +46,7 @@ func NewClient(apiKey string) *Client {
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 		},
-	}
+	}, nil
 }
 
 // ClientOption is a function that configures a Client.
@@ -77,9 +81,10 @@ func WithHTTPClient(httpClient *http.Client) ClientOption {
 }
 
 // NewClientWithOptions creates a client with functional options.
-func NewClientWithOptions(apiKey string, opts ...ClientOption) *Client {
+// Returns ErrMissingAPIKey if apiKey is empty.
+func NewClientWithOptions(apiKey string, opts ...ClientOption) (*Client, error) {
 	if apiKey == "" {
-		return nil
+		return nil, ErrMissingAPIKey
 	}
 
 	client := &Client{
@@ -95,7 +100,7 @@ func NewClientWithOptions(apiKey string, opts ...ClientOption) *Client {
 		opt(client)
 	}
 
-	return client
+	return client, nil
 }
 
 // ChatCompletion makes a single API call and returns the response.

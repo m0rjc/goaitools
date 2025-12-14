@@ -11,11 +11,11 @@ import (
 // Game represents a simple fake game with various properties.
 // This is a minimal model used to demonstrate tool interactions.
 type Game struct {
-	Title      string    `json:"title"`
-	StartDate  time.Time `json:"start_date"`
-	DurationMinutes int   `json:"duration_minutes"`
-	GridM      int       `json:"grid_m"`
-	GridN      int       `json:"grid_n"`
+	Title           string    `json:"title"`
+	StartDate       time.Time `json:"start_date"`
+	DurationMinutes int       `json:"duration_minutes"`
+	GridM           int       `json:"grid_m"`
+	GridN           int       `json:"grid_n"`
 }
 
 // NewGame creates a new Game with default values
