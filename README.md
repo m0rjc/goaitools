@@ -9,6 +9,7 @@ interface for game organisers and players. Its development is currently guided b
 
 - **Generic Tool Framework** - Define reusable AI tools with JSON schema validation
 - **Automatic Tool-Calling Loop** - Chat layer orchestrates multi-turn conversations with tool execution
+- **Stateful Conversations** - Multi-turn conversations with automatic state management
 - **Backend Abstraction** - Interface-based design supports multiple AI providers
 - **Action Logging** - Track tool executions for audit trails and user feedback
 - **System Logging** - Optional context-aware debug logging via `log/slog`
@@ -173,6 +174,113 @@ func main() {
     fmt.Println(response)
 }
 ```
+
+### Stateful Conversations
+
+The library supports multi-turn conversations with automatic state management. This example shows a game assistant that remembers conversation history across multiple messages:
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+
+    "github.com/m0rjc/goaitools"
+    "github.com/m0rjc/goaitools/openai"
+)
+
+type Player struct {
+    ID   string
+    Name string
+}
+
+type Game struct {
+    ID                string
+    ConversationState goaitools.ConversationState // Opaque state blob
+    LastInteraction   time.Time
+}
+
+func main() {
+    client := openai.NewClient("your-api-key")
+    chat := &goaitools.Chat{Backend: client}
+
+    player := &Player{ID: "player1", Name: "Alice"}
+    game := &Game{ID: "game123"}
+
+    // First message - start new conversation
+    fmt.Println("=== Turn 1 ===")
+    response1, state1, _ := chat.ChatWithState(
+        context.Background(),
+        nil, // nil state = new conversation
+        goaitools.WithSystemMessage(fmt.Sprintf("You are a game assistant. Current time: %s", time.Now().Format(time.RFC3339))),
+        goaitools.WithUserMessage("What's my current score?"),
+    )
+    fmt.Printf("Assistant: %s\n\n", response1)
+    game.ConversationState = state1
+    game.LastInteraction = time.Now()
+
+    // Event happens between turns
+    time.Sleep(1 * time.Second)
+    game.ConversationState = chat.UpdateStateAfterEvent(
+        context.Background(),
+        game.ConversationState,
+        fmt.Sprintf("%s visited Harrogate Theatre and earned 50 points", player.Name),
+    )
+
+    // Second message - continues from previous state
+    fmt.Println("=== Turn 2 ===")
+    response2, state2, _ := chat.ChatWithState(
+        context.Background(),
+        game.ConversationState, // Previous state
+        goaitools.WithSystemMessage(fmt.Sprintf("You are a game assistant. Current time: %s", time.Now().Format(time.RFC3339))),
+        goaitools.WithUserMessage("What did I just do?"),
+    )
+    fmt.Printf("Assistant: %s\n\n", response2)
+    game.ConversationState = state2
+    game.LastInteraction = time.Now()
+
+    // Third message - AI remembers full conversation
+    fmt.Println("=== Turn 3 ===")
+    response3, state3, _ := chat.ChatWithState(
+        context.Background(),
+        game.ConversationState,
+        goaitools.WithSystemMessage(fmt.Sprintf("You are a game assistant. Current time: %s", time.Now().Format(time.RFC3339))),
+        goaitools.WithUserMessage("What have we talked about so far?"),
+    )
+    fmt.Printf("Assistant: %s\n", response3)
+    game.ConversationState = state3
+}
+```
+
+**Output:**
+```
+=== Turn 1 ===
+Assistant: I can help you check your score. However, I need access to the game system to retrieve that information...
+
+=== Turn 2 ===
+Assistant: You just visited Harrogate Theatre and earned 50 points!
+
+=== Turn 3 ===
+Assistant: We discussed your current score, then you visited Harrogate Theatre earning 50 points...
+```
+
+**Key Features:**
+
+- **Opaque State**: State is `[]byte` - store in database, don't inspect it
+- **System Messages Not Persisted**: Pass system message on every call (allows dynamic content like timestamps)
+- **Graceful Degradation**: Invalid/corrupted state is silently discarded
+- **Provider-Locked**: State from one provider (e.g., OpenAI) cannot be used with another
+- **Event Updates**: Add context between turns using `UpdateStateAfterEvent()` without an LLM call
+
+This follows [OpenAI's session memory pattern](https://cookbook.openai.com/examples/agents_sdk/session_memory) where:
+- **Session state** = conversation history (user/assistant/tool messages)
+- **System instructions** = passed on every turn (not stored in state)
+
+**Backward Compatibility:**
+
+The original stateless `Chat()` method still works - it's now a wrapper around `ChatWithState(ctx, nil, opts...)`.
 
 ### Configuring System Logging
 

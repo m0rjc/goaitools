@@ -70,4 +70,8 @@ type Backend interface {
 	// The response may contain tool_calls (requiring further iteration)
 	// or a final text response (conversation complete).
 	ChatCompletion(ctx context.Context, messages []Message, tools aitooling.ToolSet) (*ChatResponse, error)
+
+	// ProviderName returns the name of this backend provider (e.g., "openai", "anthropic").
+	// Used for conversation state validation - state from one provider cannot be used with another.
+	ProviderName() string
 }

@@ -98,6 +98,11 @@ func NewClientWithOptions(apiKey string, opts ...ClientOption) *Client {
 	return client
 }
 
+// ProviderName returns the provider name for this backend.
+func (c *Client) ProviderName() string {
+	return "openai"
+}
+
 // ChatCompletion makes a single API call and returns the response.
 // The response may contain tool_calls (requiring further iteration)
 // or a final text response (conversation complete).

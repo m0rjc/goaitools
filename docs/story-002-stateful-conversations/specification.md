@@ -116,10 +116,11 @@ func (c *Chat) ChatWithState(
 ) (string, ConversationState, error)
 ```
 
-**System Prompt Handling**: The system prompt should be passed on every call via `WithSystemMessage()`. The library will:
-- On first call (nil state): Include system prompt in messages
-- On subsequent calls (with state): Check if system prompt already exists in state, only add if missing or changed
-- This allows clients to update system prompts mid-conversation if needed
+**System Prompt Handling**: The system prompt should be passed on every call via `WithSystemMessage()`. Following [OpenAI's session memory pattern](https://cookbook.openai.com/examples/agents_sdk/session_memory), system messages are NOT stored in conversation state. The library will:
+- Always prepend system messages to the conversation on each turn
+- Store only conversation history (user/assistant/tool messages) in state
+- This allows system prompts to include dynamic content (timestamps, user context) that updates each turn
+- State stays clean and token-efficient (no system message duplication)
 
 **Backward Compatibility**: Existing `Chat()` method remains unchanged:
 
@@ -614,5 +615,6 @@ func (m *MockBackend) ChatCompletionWithTools(...) {
 ## References
 
 - [OpenAI Chat API](https://platform.openai.com/docs/api-reference/chat)
+- [OpenAI Session Memory Pattern](https://cookbook.openai.com/examples/agents_sdk/session_memory) - Reference implementation showing system messages separate from session state
 - [Token Counting](https://github.com/openai/tiktoken)
 - [Conversation Design Patterns](https://www.anthropic.com/research/building-effective-agents)

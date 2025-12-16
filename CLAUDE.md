@@ -221,11 +221,35 @@ client := openai.NewClientWithOptions(
 - Timeout: 30 seconds
 - Base URL: `https://api.openai.com/v1`
 
-## Known Limitations
+## Stateful Conversations
 
-### Stateless Conversations
+The library supports multi-turn conversations via `ChatWithState()`:
 
-Currently, each `Chat()` call is stateless - conversation history is not preserved between calls. This is acceptable for single-turn interactions but problematic for multi-turn conversations.
+```go
+// Multi-turn conversation with state persistence
+response, state, err := chat.ChatWithState(ctx, previousState, opts...)
+```
+
+**Key Design Decisions:**
+
+- **System messages are NOT stored in state** (following OpenAI's session memory pattern)
+- Pass system message on every call via `WithSystemMessage()` - allows dynamic content (timestamps, user context)
+- State only contains conversation history (user/assistant/tool messages)
+- State is opaque `[]byte` - clients store it but don't inspect it
+- Graceful degradation: invalid/corrupted state is silently discarded
+- Provider-locked: state from one backend cannot be used with another
+
+**Event Updates:**
+
+```go
+newState := chat.UpdateStateAfterEvent(ctx, state, "User visited location X")
+```
+
+Adds context to conversation without making an LLM API call.
+
+**Backward Compatibility:**
+
+The original stateless `Chat()` method still works - it delegates to `ChatWithState(ctx, nil, opts...)`.
 
 ## Related Projects
 

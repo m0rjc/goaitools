@@ -10,7 +10,8 @@ import (
 
 // mockBackend implements Backend interface for testing
 type mockBackend struct {
-	chatFunc func(ctx context.Context, messages []Message, tools aitooling.ToolSet) (*ChatResponse, error)
+	chatFunc     func(ctx context.Context, messages []Message, tools aitooling.ToolSet) (*ChatResponse, error)
+	providerName string
 }
 
 func (m *mockBackend) ChatCompletion(ctx context.Context, messages []Message, tools aitooling.ToolSet) (*ChatResponse, error) {
@@ -24,6 +25,13 @@ func (m *mockBackend) ChatCompletion(ctx context.Context, messages []Message, to
 		},
 		FinishReason: FinishReasonStop,
 	}, nil
+}
+
+func (m *mockBackend) ProviderName() string {
+	if m.providerName != "" {
+		return m.providerName
+	}
+	return "mock-provider"
 }
 
 // Test: Role constants are type-safe strings
