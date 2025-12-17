@@ -12,18 +12,26 @@ import (
 	"github.com/m0rjc/goaitools/aitooling"
 )
 
-// Test: NewClient with empty API key returns nil (graceful degradation)
-func TestNewClient_EmptyAPIKey_ReturnsNil(t *testing.T) {
-	client := NewClient("")
+// Test: NewClient with empty API key returns ErrMissingAPIKey
+func TestNewClient_EmptyAPIKey_ReturnsError(t *testing.T) {
+	client, err := NewClient("")
+
+	if err != ErrMissingAPIKey {
+		t.Errorf("Expected ErrMissingAPIKey, got %v", err)
+	}
 
 	if client != nil {
-		t.Error("NewClient with empty API key should return nil")
+		t.Error("NewClient with empty API key should return nil client")
 	}
 }
 
 // Test: NewClient with valid API key returns configured client
 func TestNewClient_ValidAPIKey_ReturnsClient(t *testing.T) {
-	client := NewClient("sk-test123")
+	client, err := NewClient("sk-test123")
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	if client == nil {
 		t.Fatal("NewClient with valid API key should return client")
@@ -46,18 +54,26 @@ func TestNewClient_ValidAPIKey_ReturnsClient(t *testing.T) {
 	}
 }
 
-// Test: NewClientWithOptions with empty API key returns nil
-func TestNewClientWithOptions_EmptyAPIKey_ReturnsNil(t *testing.T) {
-	client := NewClientWithOptions("", WithModel("gpt-4"))
+// Test: NewClientWithOptions with empty API key returns ErrMissingAPIKey
+func TestNewClientWithOptions_EmptyAPIKey_ReturnsError(t *testing.T) {
+	client, err := NewClientWithOptions("", WithModel("gpt-4"))
+
+	if err != ErrMissingAPIKey {
+		t.Errorf("Expected ErrMissingAPIKey, got %v", err)
+	}
 
 	if client != nil {
-		t.Error("NewClientWithOptions with empty API key should return nil")
+		t.Error("NewClientWithOptions with empty API key should return nil client")
 	}
 }
 
 // Test: WithModel option sets custom model
 func TestClientOptions_WithModel(t *testing.T) {
-	client := NewClientWithOptions("sk-test", WithModel("gpt-4-turbo"))
+	client, err := NewClientWithOptions("sk-test", WithModel("gpt-4-turbo"))
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	if client.model != "gpt-4-turbo" {
 		t.Errorf("Expected model='gpt-4-turbo', got '%s'", client.model)
@@ -67,7 +83,11 @@ func TestClientOptions_WithModel(t *testing.T) {
 // Test: WithBaseURL option sets custom base URL
 func TestClientOptions_WithBaseURL(t *testing.T) {
 	customURL := "https://custom-api.example.com/v1"
-	client := NewClientWithOptions("sk-test", WithBaseURL(customURL))
+	client, err := NewClientWithOptions("sk-test", WithBaseURL(customURL))
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	if client.baseURL != customURL {
 		t.Errorf("Expected baseURL='%s', got '%s'", customURL, client.baseURL)
@@ -80,7 +100,11 @@ func TestClientOptions_WithHTTPClient(t *testing.T) {
 		Timeout: 60 * time.Second,
 	}
 
-	client := NewClientWithOptions("sk-test", WithHTTPClient(customClient))
+	client, err := NewClientWithOptions("sk-test", WithHTTPClient(customClient))
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	if client.httpClient != customClient {
 		t.Error("Expected custom HTTP client to be set")
@@ -95,7 +119,11 @@ func TestClientOptions_WithHTTPClient(t *testing.T) {
 func TestClientOptions_WithSystemLogger(t *testing.T) {
 	logger := goaitools.NewSilentLogger()
 
-	client := NewClientWithOptions("sk-test", WithSystemLogger(logger))
+	client, err := NewClientWithOptions("sk-test", WithSystemLogger(logger))
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	if client.systemLogger != logger {
 		t.Error("Expected custom logger to be set")
@@ -107,13 +135,17 @@ func TestClientOptions_MultipleOptions(t *testing.T) {
 	customHTTP := &http.Client{Timeout: 45 * time.Second}
 	logger := goaitools.NewSilentLogger()
 
-	client := NewClientWithOptions(
+	client, err := NewClientWithOptions(
 		"sk-test",
 		WithModel("gpt-4"),
 		WithBaseURL("https://custom.example.com"),
 		WithHTTPClient(customHTTP),
 		WithSystemLogger(logger),
 	)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	if client.model != "gpt-4" {
 		t.Error("Model option not applied")
@@ -140,7 +172,7 @@ func TestConvertToolCallsToOpenAI(t *testing.T) {
 		{
 			ID:        "call_abc123",
 			Name:      "get_weather",
-			Arguments: json.RawMessage(`{"location":"London"}`),
+			Arguments: `{"location":"London"}`,
 		},
 	}
 
@@ -165,7 +197,7 @@ func TestConvertToolCallsToOpenAI(t *testing.T) {
 	}
 
 	var args map[string]string
-	json.Unmarshal(call.Function.Arguments, &args)
+	json.Unmarshal([]byte(call.Function.Arguments), &args)
 	if args["location"] != "London" {
 		t.Error("Arguments not preserved")
 	}
@@ -179,7 +211,7 @@ func TestConvertToolCallsFromOpenAI(t *testing.T) {
 			Type: "function",
 			Function: FunctionCall{
 				Name:      "check_status",
-				Arguments: json.RawMessage(`{"id":42}`),
+				Arguments: `{"id":42}`,
 			},
 		},
 	}
@@ -201,7 +233,7 @@ func TestConvertToolCallsFromOpenAI(t *testing.T) {
 	}
 
 	var args map[string]int
-	json.Unmarshal(call.Arguments, &args)
+	json.Unmarshal([]byte(call.Arguments), &args)
 	if args["id"] != 42 {
 		t.Error("Arguments not preserved")
 	}
@@ -309,10 +341,14 @@ func TestClient_ChatCompletion_Integration(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClientWithOptions(
+	client, err := NewClientWithOptions(
 		"sk-test",
 		WithBaseURL(server.URL),
 	)
+
+	if err != nil {
+		t.Fatalf("Expected no error creating client, got %v", err)
+	}
 
 	result, err := client.ChatCompletion(
 		context.Background(),

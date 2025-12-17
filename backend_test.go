@@ -93,7 +93,7 @@ func TestMessage_WithToolCalls(t *testing.T) {
 			{
 				ID:        "call_abc123",
 				Name:      "get_weather",
-				Arguments: json.RawMessage(`{"location":"London"}`),
+				Arguments: `{"location":"London"}`,
 			},
 		},
 	}
@@ -113,7 +113,7 @@ func TestMessage_WithToolCalls(t *testing.T) {
 
 	// Verify arguments are valid JSON
 	var args map[string]string
-	if err := json.Unmarshal(call.Arguments, &args); err != nil {
+	if err := json.Unmarshal([]byte(call.Arguments), &args); err != nil {
 		t.Errorf("Arguments should be valid JSON: %v", err)
 	}
 
@@ -164,7 +164,7 @@ func TestChatResponse_ToolCallsReason(t *testing.T) {
 		Message: Message{
 			Role: RoleAssistant,
 			ToolCalls: []ToolCall{
-				{ID: "call_1", Name: "tool_a", Arguments: json.RawMessage(`{}`)},
+				{ID: "call_1", Name: "tool_a", Arguments: `{}`},
 			},
 		},
 		FinishReason: FinishReasonToolCalls,
@@ -231,7 +231,7 @@ func TestMessage_JSONSerialization(t *testing.T) {
 			{
 				ID:        "call_123",
 				Name:      "test_tool",
-				Arguments: json.RawMessage(`{"param":"value"}`),
+				Arguments: `{"param":"value"}`,
 			},
 		},
 	}

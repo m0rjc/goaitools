@@ -6,13 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`goaitools` is a Go library for building AI-powered applications with tool-calling capabilities using OpenAI's function calling API. It provides a clean, generic framework for defining reusable AI tools with automatic tool-calling loops and transaction-aware execution.
+`goaitools` is a Go library for building AI-powered applications with tool-calling capabilities using OpenAI's function calling API. It provides a clean, generic framework for defining reusable AI tools with automatic tool-calling loops.
 
 **Key Design Principles:**
 - Backend abstraction: Interface-based design supports multiple AI providers
-- Transaction awareness: Tools coordinate with application transaction lifecycle
 - Minimal dependencies: Only uses Go standard library
-- Graceful degradation: Returns nil for invalid configuration (e.g., empty API key)
 
 ## Technology Stack
 
@@ -57,12 +55,26 @@ go fmt ./...
 │   ├── types.go            # OpenAI API request/response types
 │   ├── logger.go           # Logging abstraction
 │   └── logger_test.go      # Tests for logger and client options
+├── example/                # Working examples
+│   └── hellowithtools/     # Complete demonstration of tool usage
 ├── backend.go              # Backend interface (provider abstraction)
 ├── chat.go                 # High-level Chat API with functional options
 ├── go.mod
 ├── LICENSE
 └── README.md
 ```
+
+## Working Example
+
+See `example/hellowithtools/` for a complete working demonstration of:
+- Creating and registering AI tools
+- Using the Chat API with functional options
+- Logging tool actions for audit and user feedback
+- Transaction patterns for stateful tools
+- JSON schema definition
+- Error handling strategies
+
+The example implements a simple game configuration system with read/write tools that demonstrate all key patterns in this library.
 
 ## Core Architecture
 
@@ -98,17 +110,13 @@ type Tool interface {
 
 **Key Concepts:**
 
-- **Transaction Awareness**: Tools indicate if results are valid after database rollback
-  - `req.NewReadOnlyResult()` → Valid after rollback (read-only operations)
-  - `req.NewDatabaseModifiedResult()` → Invalid after rollback (write operations)
-  - `req.NewErrorResult()` → Valid after rollback (error results)
-
-This idea was tried, but in the end not found useful. My intent was to support transaction batching.
-My current task in manual testing is to see how the model combines (or not) tool requests.
-If the expectation of the LLM is parallel tool execution then we will not use transaction awareness.
-Currently the client of this code has each tool managing its own transaction.
+- **Result Creation**: Tools create results using helper methods:
+  - `req.NewResult(result)` → Successful tool execution with a result string
+  - `req.NewErrorResult(err)` → Tool execution encountered an error (allows AI to recover)
 
 - **Action Logging**: Tools log actions via `ctx.Logger.Log()` for audit trails and user feedback
+
+**Note on Transaction Awareness**: An earlier version included transaction-aware result methods (`NewReadOnlyResult()`, `NewDatabaseModifiedResult()`). This concept was removed as it wasn't found useful in practice - each tool now manages its own transactions as needed.
 
 ### 3. Automatic Tool-Calling Loop
 
@@ -123,58 +131,18 @@ The `openai.Client` implements a full conversation loop:
 
 ### 4. High-Level Chat API
 
-The `Chat` type provides functional options pattern for easy usage:
-
-```go
-chat := &goaitools.Chat{Backend: client}
-response, err := chat.Chat(
-    ctx,
-    goaitools.WithSystemMessage("system prompt"),
-    goaitools.WithUserMessage("user question"),
-    goaitools.WithTools(tools),
-    goaitools.WithToolActionLogger(logger),
-)
-```
+The `Chat` type provides functional options pattern for easy usage. See `example/hellowithtools/main.go` for a complete example demonstrating:
+- Creating tools with `aitooling.ToolSet`
+- Configuring the Chat API with functional options
+- Using `WithSystemMessage()`, `WithUserMessage()`, `WithTools()`, and `WithToolActionLogger()`
 
 ## Important Patterns
 
 ### Schema Definition with `MustMarshalJSON`
 
-**Critical**: Use `aitooling.MustMarshalJSON()` for **compile-time** tool parameter schemas only:
+**Critical**: Use `aitooling.MustMarshalJSON()` for **compile-time** tool parameter schemas only. Never use on runtime/user data (will panic on error).
 
-```go
-// ✅ CORRECT - Static schema at package init
-var weatherTool = Tool{
-    Parameters: aitooling.MustMarshalJSON(map[string]interface{}{
-        "type": "object",
-        "properties": map[string]interface{}{
-            "location": map[string]interface{}{
-                "type": "string",
-                "description": "City name",
-            },
-        },
-        "required": []string{"location"},
-    }),
-}
-
-// ❌ WRONG - Never use on runtime/user data (will panic on error)
-func HandleUserData(userJSON json.RawMessage) {
-    data := aitooling.MustMarshalJSON(userJSON) // DANGEROUS!
-}
-```
-
-### Graceful Degradation Pattern
-
-```go
-// Client returns nil if API key is empty
-client := openai.NewClient("")
-if client == nil {
-    // AI features disabled - fall back to alternative behavior
-    return handleWithoutAI()
-}
-```
-
-**When implementing features**: Always check for nil client and provide fallback behavior.
+See `example/hellowithtools/write_game_tool.go:Parameters()` for a complete example of defining JSON Schema for tool parameters.
 
 ### Logging Abstraction
 
@@ -190,6 +158,8 @@ The OpenAI client uses a `Logger` interface (different from `aitooling.Logger`):
 - **Infrastructure errors**: Return error from `Execute()` for unexpected failures
 - **Error wrapping**: Use `fmt.Errorf("context: %w", err)` to preserve error chains
 
+See `example/hellowithtools/write_game_tool.go:Execute()` for examples of all three error handling patterns in practice.
+
 ## Testing Guidelines
 
 - Use Go standard `testing` package
@@ -204,16 +174,23 @@ The OpenAI client uses a `Logger` interface (different from `aitooling.Logger`):
 
 ```go
 // Simple (uses defaults: gpt-4o-mini, 30s timeout)
-client := openai.NewClient(apiKey)
+client, err := openai.NewClient(apiKey)
+if err != nil {
+    // Handle error (e.g., missing API key)
+    return err
+}
 
 // With custom options
-client := openai.NewClientWithOptions(
+client, err := openai.NewClientWithOptions(
     apiKey,
     openai.WithModel("gpt-4"),
     openai.WithBaseURL("https://custom-endpoint.com"),
-    openai.WithLogger(customLogger),
+    openai.WithSystemLogger(customLogger),
     openai.WithHTTPClient(customHTTPClient),
 )
+if err != nil {
+    return err
+}
 ```
 
 **Default Configuration**:
@@ -251,11 +228,9 @@ Adds context to conversation without making an LLM API call.
 
 The original stateless `Chat()` method still works - it delegates to `ChatWithState(ctx, nil, opts...)`.
 
-## Related Projects
+## Origins
 
-This library was extracted from a WhatsApp Wide-Game playing project. See the parent repository for production usage examples:
-- Production tools: `../../src/webhook/routes/*/aitools/`
-- Related library: `../gowhatsapp` (WhatsApp Cloud API integration)
+This library was extracted from a WhatsApp-based Wide-Game playing project, where it powers AI-driven game interactions.
 
 ## Package Boundaries
 

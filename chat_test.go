@@ -109,7 +109,7 @@ func TestChat_ToolCallingLoop(t *testing.T) {
 							{
 								ID:        "call_123",
 								Name:      "test_tool",
-								Arguments: json.RawMessage(`{}`),
+								Arguments: `{}`,
 							},
 						},
 					},
@@ -170,7 +170,7 @@ func TestChat_MaxIterationsPreventsInfiniteLoop(t *testing.T) {
 				Message: Message{
 					Role: RoleAssistant,
 					ToolCalls: []ToolCall{
-						{ID: "call_1", Name: "test_tool", Arguments: json.RawMessage(`{}`)},
+						{ID: "call_1", Name: "test_tool", Arguments: `{}`},
 					},
 				},
 				FinishReason: FinishReasonToolCalls,
@@ -214,7 +214,7 @@ func TestChat_WithMaxToolIterations_OverridesDefault(t *testing.T) {
 				Message: Message{
 					Role: RoleAssistant,
 					ToolCalls: []ToolCall{
-						{ID: "call_1", Name: "test_tool", Arguments: json.RawMessage(`{}`)},
+						{ID: "call_1", Name: "test_tool", Arguments: `{}`},
 					},
 				},
 				FinishReason: FinishReasonToolCalls,
@@ -312,7 +312,7 @@ func TestChat_ToolActionLogger_ReceivesActions(t *testing.T) {
 					Message: Message{
 						Role: RoleAssistant,
 						ToolCalls: []ToolCall{
-							{ID: "call_1", Name: "logging_tool", Arguments: json.RawMessage(`{}`)},
+							{ID: "call_1", Name: "logging_tool", Arguments: `{}`},
 						},
 					},
 					FinishReason: FinishReasonToolCalls,
@@ -376,7 +376,7 @@ func TestChat_DefaultMaxIterations(t *testing.T) {
 				Message: Message{
 					Role: RoleAssistant,
 					ToolCalls: []ToolCall{
-						{ID: "call_1", Name: "test_tool", Arguments: json.RawMessage(`{}`)},
+						{ID: "call_1", Name: "test_tool", Arguments: `{}`},
 					},
 				},
 				FinishReason: FinishReasonToolCalls,
@@ -403,6 +403,193 @@ func TestChat_DefaultMaxIterations(t *testing.T) {
 	// Should have stopped at default 10 iterations
 	if callCount != 10 {
 		t.Errorf("Expected 10 calls (default limit), got %d", callCount)
+	}
+}
+
+// Test: LogToolArguments flag enables argument logging
+func TestChat_LogToolArguments_EnablesArgumentLogging(t *testing.T) {
+	logCalls := []map[string]interface{}{}
+
+	backend := &mockBackend{
+		chatFunc: func(ctx context.Context, messages []Message, tools aitooling.ToolSet) (*ChatResponse, error) {
+			// Return tool call on first iteration
+			if len(messages) == 1 {
+				return &ChatResponse{
+					Message: Message{
+						Role: RoleAssistant,
+						ToolCalls: []ToolCall{
+							{ID: "call_1", Name: "test_tool", Arguments: `{"arg":"value"}`},
+						},
+					},
+					FinishReason: FinishReasonToolCalls,
+				}, nil
+			}
+
+			// Final response
+			return &ChatResponse{
+				Message:      Message{Role: RoleAssistant, Content: "Done"},
+				FinishReason: FinishReasonStop,
+			}, nil
+		},
+	}
+
+	tools := aitooling.ToolSet{
+		&mockTool{name: "test_tool"},
+	}
+
+	// Mock system logger to capture log calls
+	systemLogger := &mockSystemLogger{
+		debugFunc: func(ctx context.Context, msg string, keysAndValues ...interface{}) {
+			logEntry := map[string]interface{}{"msg": msg}
+			for i := 0; i < len(keysAndValues); i += 2 {
+				if i+1 < len(keysAndValues) {
+					logEntry[keysAndValues[i].(string)] = keysAndValues[i+1]
+				}
+			}
+			logCalls = append(logCalls, logEntry)
+		},
+	}
+
+	chat := &Chat{
+		Backend:          backend,
+		SystemLogger:     systemLogger,
+		LogToolArguments: true, // Enable argument logging
+	}
+
+	_, err := chat.Chat(
+		context.Background(),
+		WithUserMessage("Test"),
+		WithTools(tools),
+	)
+
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Find the executing_tool_call log
+	var toolCallLog map[string]interface{}
+	for _, log := range logCalls {
+		if log["msg"] == "executing_tool_call" {
+			toolCallLog = log
+			break
+		}
+	}
+
+	if toolCallLog == nil {
+		t.Fatal("Expected executing_tool_call log not found")
+	}
+
+	// Verify tool_args is present
+	if toolCallLog["tool_args"] == nil {
+		t.Error("Expected tool_args in log when LogToolArguments=true")
+	}
+
+	if toolCallLog["tool_args"] != `{"arg":"value"}` {
+		t.Errorf("Expected tool_args to be '{\"arg\":\"value\"}', got %v", toolCallLog["tool_args"])
+	}
+}
+
+// Test: LogToolArguments=false does not log arguments
+func TestChat_LogToolArguments_Disabled_DoesNotLogArguments(t *testing.T) {
+	logCalls := []map[string]interface{}{}
+
+	backend := &mockBackend{
+		chatFunc: func(ctx context.Context, messages []Message, tools aitooling.ToolSet) (*ChatResponse, error) {
+			// Return tool call on first iteration
+			if len(messages) == 1 {
+				return &ChatResponse{
+					Message: Message{
+						Role: RoleAssistant,
+						ToolCalls: []ToolCall{
+							{ID: "call_1", Name: "test_tool", Arguments: `{"arg":"value"}`},
+						},
+					},
+					FinishReason: FinishReasonToolCalls,
+				}, nil
+			}
+
+			// Final response
+			return &ChatResponse{
+				Message:      Message{Role: RoleAssistant, Content: "Done"},
+				FinishReason: FinishReasonStop,
+			}, nil
+		},
+	}
+
+	tools := aitooling.ToolSet{
+		&mockTool{name: "test_tool"},
+	}
+
+	// Mock system logger to capture log calls
+	systemLogger := &mockSystemLogger{
+		debugFunc: func(ctx context.Context, msg string, keysAndValues ...interface{}) {
+			logEntry := map[string]interface{}{"msg": msg}
+			for i := 0; i < len(keysAndValues); i += 2 {
+				if i+1 < len(keysAndValues) {
+					logEntry[keysAndValues[i].(string)] = keysAndValues[i+1]
+				}
+			}
+			logCalls = append(logCalls, logEntry)
+		},
+	}
+
+	chat := &Chat{
+		Backend:          backend,
+		SystemLogger:     systemLogger,
+		LogToolArguments: false, // Disable argument logging
+	}
+
+	_, err := chat.Chat(
+		context.Background(),
+		WithUserMessage("Test"),
+		WithTools(tools),
+	)
+
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Find the executing_tool_call log
+	var toolCallLog map[string]interface{}
+	for _, log := range logCalls {
+		if log["msg"] == "executing_tool_call" {
+			toolCallLog = log
+			break
+		}
+	}
+
+	if toolCallLog == nil {
+		t.Fatal("Expected executing_tool_call log not found")
+	}
+
+	// Verify tool_args is NOT present
+	if toolCallLog["tool_args"] != nil {
+		t.Error("Expected tool_args NOT in log when LogToolArguments=false")
+	}
+}
+
+// mockSystemLogger for testing
+type mockSystemLogger struct {
+	debugFunc func(ctx context.Context, msg string, keysAndValues ...interface{})
+	infoFunc  func(ctx context.Context, msg string, keysAndValues ...interface{})
+	errorFunc func(ctx context.Context, msg string, err error, keysAndValues ...interface{})
+}
+
+func (m *mockSystemLogger) Debug(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	if m.debugFunc != nil {
+		m.debugFunc(ctx, msg, keysAndValues...)
+	}
+}
+
+func (m *mockSystemLogger) Info(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	if m.infoFunc != nil {
+		m.infoFunc(ctx, msg, keysAndValues...)
+	}
+}
+
+func (m *mockSystemLogger) Error(ctx context.Context, msg string, err error, keysAndValues ...interface{}) {
+	if m.errorFunc != nil {
+		m.errorFunc(ctx, msg, err, keysAndValues...)
 	}
 }
 

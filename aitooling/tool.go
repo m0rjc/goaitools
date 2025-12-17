@@ -19,7 +19,7 @@ type ToolExecuteContext struct {
 type ToolRequest struct {
 	Name   string
 	CallId string
-	Args   json.RawMessage // JSON arguments as raw bytes
+	Args   string
 }
 
 type ToolResult struct {
