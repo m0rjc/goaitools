@@ -108,6 +108,36 @@ func (c *Client) ProviderName() string {
 	return "openai"
 }
 
+// Message factory methods - create provider-specific messages
+
+// NewSystemMessage creates a system message with the given content.
+func (c *Client) NewSystemMessage(content string) goaitools.Message {
+	msg, _ := newMessage(Message{Role: "system", Content: content})
+	return msg
+}
+
+// NewUserMessage creates a user message with the given content.
+func (c *Client) NewUserMessage(content string) goaitools.Message {
+	msg, _ := newMessage(Message{Role: "user", Content: content})
+	return msg
+}
+
+// NewToolMessage creates a tool result message.
+func (c *Client) NewToolMessage(toolCallID, content string) goaitools.Message {
+	msg, _ := newMessage(Message{
+		Role:       "tool",
+		Content:    content,
+		ToolCallID: toolCallID,
+	})
+	return msg
+}
+
+// UnmarshalMessage reconstructs a message from its serialized form.
+// Used when loading conversation state.
+func (c *Client) UnmarshalMessage(data []byte) (goaitools.Message, error) {
+	return unmarshalMessage(data)
+}
+
 // ChatCompletion makes a single API call and returns the response.
 // The response may contain tool_calls (requiring further iteration)
 // or a final text response (conversation complete).
@@ -119,14 +149,20 @@ func (c *Client) ChatCompletion(
 ) (*goaitools.ChatResponse, error) {
 	c.logSystemDebug(ctx, "openai_request_start", "model", c.model, "message_count", len(messages))
 
-	// Convert goaitools.Message to openai.Message
+	// Extract OpenAI messages from interface
 	openaiMessages := make([]Message, len(messages))
 	for i, msg := range messages {
-		openaiMessages[i] = Message{
-			Role:       string(msg.Role),
-			Content:    msg.Content,
-			ToolCalls:  convertToolCallsToOpenAI(msg.ToolCalls),
-			ToolCallID: msg.ToolCallID,
+		// If it's our own message type, use parsed directly for efficiency
+		if m, ok := msg.(*message); ok {
+			openaiMessages[i] = m.parsed
+		} else {
+			// Fallback: reconstruct from interface (shouldn't happen in normal flow)
+			openaiMessages[i] = Message{
+				Role:       string(msg.Role()),
+				Content:    msg.Content(),
+				ToolCalls:  convertToolCallsToOpenAI(msg.ToolCalls()),
+				ToolCallID: msg.ToolCallID(),
+			}
 		}
 	}
 
@@ -161,11 +197,16 @@ func (c *Client) ChatCompletion(
 		"total_tokens", resp.Usage.TotalTokens,
 	)
 
-	// Convert OpenAI message back to goaitools.Message
-	responseMessage := goaitools.Message{
-		Role:      goaitools.Role(choice.Message.Role),
-		Content:   choice.Message.Content,
-		ToolCalls: convertToolCallsFromOpenAI(choice.Message.ToolCalls),
+	// Wrap the OpenAI message in our message type
+	// We need to preserve the raw JSON from the response
+	rawJSON, err := json.Marshal(choice.Message)
+	if err != nil {
+		return nil, fmt.Errorf("marshal response message: %w", err)
+	}
+
+	responseMessage := &message{
+		rawJSON: rawJSON,
+		parsed:  choice.Message,
 	}
 
 	return &goaitools.ChatResponse{

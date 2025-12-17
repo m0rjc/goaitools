@@ -31,7 +31,7 @@ func TestChat_SimpleStopResponse(t *testing.T) {
 	backend := &mockBackend{
 		chatFunc: func(ctx context.Context, messages []Message, tools aitooling.ToolSet) (*ChatResponse, error) {
 			return &ChatResponse{
-				Message:      Message{Role: RoleAssistant, Content: "Hello!"},
+				Message:      &mockMessage{role: RoleAssistant, content: "Hello!"},
 				FinishReason: FinishReasonStop,
 			}, nil
 		},
@@ -61,7 +61,7 @@ func TestChat_WithSystemMessage(t *testing.T) {
 		chatFunc: func(ctx context.Context, messages []Message, tools aitooling.ToolSet) (*ChatResponse, error) {
 			receivedMessages = messages
 			return &ChatResponse{
-				Message:      Message{Role: RoleAssistant, Content: "ok"},
+				Message:      &mockMessage{role: RoleAssistant, content: "ok"},
 				FinishReason: FinishReasonStop,
 			}, nil
 		},
@@ -79,16 +79,16 @@ func TestChat_WithSystemMessage(t *testing.T) {
 		t.Fatalf("Expected 2 messages, got %d", len(receivedMessages))
 	}
 
-	if receivedMessages[0].Role != RoleSystem {
-		t.Errorf("First message should be system, got %s", receivedMessages[0].Role)
+	if receivedMessages[0].Role() != RoleSystem {
+		t.Errorf("First message should be system, got %s", receivedMessages[0].Role())
 	}
 
-	if receivedMessages[0].Content != "You are a helpful assistant" {
+	if receivedMessages[0].Content() != "You are a helpful assistant" {
 		t.Error("System message content not preserved")
 	}
 
-	if receivedMessages[1].Role != RoleUser {
-		t.Errorf("Second message should be user, got %s", receivedMessages[1].Role)
+	if receivedMessages[1].Role() != RoleUser {
+		t.Errorf("Second message should be user, got %s", receivedMessages[1].Role())
 	}
 }
 
@@ -103,9 +103,9 @@ func TestChat_ToolCallingLoop(t *testing.T) {
 			// First call: return tool_calls
 			if callCount == 1 {
 				return &ChatResponse{
-					Message: Message{
-						Role: RoleAssistant,
-						ToolCalls: []ToolCall{
+					Message: &mockMessage{
+						role: RoleAssistant,
+						toolCalls: []ToolCall{
 							{
 								ID:        "call_123",
 								Name:      "test_tool",
@@ -119,7 +119,7 @@ func TestChat_ToolCallingLoop(t *testing.T) {
 
 			// Second call: return final response
 			return &ChatResponse{
-				Message:      Message{Role: RoleAssistant, Content: "Done!"},
+				Message:      &mockMessage{role: RoleAssistant, content: "Done!"},
 				FinishReason: FinishReasonStop,
 			}, nil
 		},
@@ -167,9 +167,9 @@ func TestChat_MaxIterationsPreventsInfiniteLoop(t *testing.T) {
 		chatFunc: func(ctx context.Context, messages []Message, tools aitooling.ToolSet) (*ChatResponse, error) {
 			// Always request tool calls (infinite loop scenario)
 			return &ChatResponse{
-				Message: Message{
-					Role: RoleAssistant,
-					ToolCalls: []ToolCall{
+				Message: &mockMessage{
+					role: RoleAssistant,
+					toolCalls: []ToolCall{
 						{ID: "call_1", Name: "test_tool", Arguments: `{}`},
 					},
 				},
@@ -211,9 +211,9 @@ func TestChat_WithMaxToolIterations_OverridesDefault(t *testing.T) {
 			callCount++
 			// Always request tool calls
 			return &ChatResponse{
-				Message: Message{
-					Role: RoleAssistant,
-					ToolCalls: []ToolCall{
+				Message: &mockMessage{
+					role: RoleAssistant,
+					toolCalls: []ToolCall{
 						{ID: "call_1", Name: "test_tool", Arguments: `{}`},
 					},
 				},
@@ -275,7 +275,7 @@ func TestChat_FinishReasonLength_ReturnsError(t *testing.T) {
 	backend := &mockBackend{
 		chatFunc: func(ctx context.Context, messages []Message, tools aitooling.ToolSet) (*ChatResponse, error) {
 			return &ChatResponse{
-				Message:      Message{Role: RoleAssistant, Content: "Partial..."},
+				Message:      &mockMessage{role: RoleAssistant, content: "Partial..."},
 				FinishReason: FinishReasonLength,
 			}, nil
 		},
@@ -309,9 +309,9 @@ func TestChat_ToolActionLogger_ReceivesActions(t *testing.T) {
 			// Return tool call on first iteration
 			if len(messages) == 1 {
 				return &ChatResponse{
-					Message: Message{
-						Role: RoleAssistant,
-						ToolCalls: []ToolCall{
+					Message: &mockMessage{
+						role: RoleAssistant,
+						toolCalls: []ToolCall{
 							{ID: "call_1", Name: "logging_tool", Arguments: `{}`},
 						},
 					},
@@ -321,7 +321,7 @@ func TestChat_ToolActionLogger_ReceivesActions(t *testing.T) {
 
 			// Final response
 			return &ChatResponse{
-				Message:      Message{Role: RoleAssistant, Content: "Done"},
+				Message:      &mockMessage{role: RoleAssistant, content: "Done"},
 				FinishReason: FinishReasonStop,
 			}, nil
 		},
@@ -373,9 +373,9 @@ func TestChat_DefaultMaxIterations(t *testing.T) {
 			callCount++
 			// Always request tool calls
 			return &ChatResponse{
-				Message: Message{
-					Role: RoleAssistant,
-					ToolCalls: []ToolCall{
+				Message: &mockMessage{
+					role: RoleAssistant,
+					toolCalls: []ToolCall{
 						{ID: "call_1", Name: "test_tool", Arguments: `{}`},
 					},
 				},
@@ -415,9 +415,9 @@ func TestChat_LogToolArguments_EnablesArgumentLogging(t *testing.T) {
 			// Return tool call on first iteration
 			if len(messages) == 1 {
 				return &ChatResponse{
-					Message: Message{
-						Role: RoleAssistant,
-						ToolCalls: []ToolCall{
+					Message: &mockMessage{
+						role: RoleAssistant,
+						toolCalls: []ToolCall{
 							{ID: "call_1", Name: "test_tool", Arguments: `{"arg":"value"}`},
 						},
 					},
@@ -427,7 +427,7 @@ func TestChat_LogToolArguments_EnablesArgumentLogging(t *testing.T) {
 
 			// Final response
 			return &ChatResponse{
-				Message:      Message{Role: RoleAssistant, Content: "Done"},
+				Message:      &mockMessage{role: RoleAssistant, content: "Done"},
 				FinishReason: FinishReasonStop,
 			}, nil
 		},
@@ -498,9 +498,9 @@ func TestChat_LogToolArguments_Disabled_DoesNotLogArguments(t *testing.T) {
 			// Return tool call on first iteration
 			if len(messages) == 1 {
 				return &ChatResponse{
-					Message: Message{
-						Role: RoleAssistant,
-						ToolCalls: []ToolCall{
+					Message: &mockMessage{
+						role: RoleAssistant,
+						toolCalls: []ToolCall{
 							{ID: "call_1", Name: "test_tool", Arguments: `{"arg":"value"}`},
 						},
 					},
@@ -510,7 +510,7 @@ func TestChat_LogToolArguments_Disabled_DoesNotLogArguments(t *testing.T) {
 
 			// Final response
 			return &ChatResponse{
-				Message:      Message{Role: RoleAssistant, Content: "Done"},
+				Message:      &mockMessage{role: RoleAssistant, content: "Done"},
 				FinishReason: FinishReasonStop,
 			}, nil
 		},
@@ -621,9 +621,9 @@ func TestChat_StateEncodingDecoding_RoundTrip(t *testing.T) {
 	chat := &Chat{Backend: backend}
 
 	originalMessages := []Message{
-		{Role: RoleUser, Content: "Hello"},
-		{Role: RoleAssistant, Content: "Hi there!"},
-		{Role: RoleUser, Content: "How are you?"},
+		backend.NewUserMessage("Hello"),
+		&mockMessage{role: RoleAssistant, content: "Hi there!"},
+		backend.NewUserMessage("How are you?"),
 	}
 
 	// Encode
@@ -644,11 +644,11 @@ func TestChat_StateEncodingDecoding_RoundTrip(t *testing.T) {
 	}
 
 	for i, msg := range decodedMessages {
-		if msg.Role != originalMessages[i].Role {
-			t.Errorf("Message %d: expected role %s, got %s", i, originalMessages[i].Role, msg.Role)
+		if msg.Role() != originalMessages[i].Role() {
+			t.Errorf("Message %d: expected role %s, got %s", i, originalMessages[i].Role(), msg.Role())
 		}
-		if msg.Content != originalMessages[i].Content {
-			t.Errorf("Message %d: expected content %s, got %s", i, originalMessages[i].Content, msg.Content)
+		if msg.Content() != originalMessages[i].Content() {
+			t.Errorf("Message %d: expected content %s, got %s", i, originalMessages[i].Content(), msg.Content())
 		}
 	}
 }
@@ -662,7 +662,7 @@ func TestChat_ChatWithState_NilStateStartsNewConversation(t *testing.T) {
 		chatFunc: func(ctx context.Context, messages []Message, tools aitooling.ToolSet) (*ChatResponse, error) {
 			receivedMessages = messages
 			return &ChatResponse{
-				Message:      Message{Role: RoleAssistant, Content: "Hello!"},
+				Message:      &mockMessage{role: RoleAssistant, content: "Hello!"},
 				FinishReason: FinishReasonStop,
 			}, nil
 		},
@@ -705,7 +705,7 @@ func TestChat_ChatWithState_ContinuesFromExistingState(t *testing.T) {
 			callCount++
 			receivedMessages = messages
 			return &ChatResponse{
-				Message:      Message{Role: RoleAssistant, Content: "Response " + string(rune('0'+callCount))},
+				Message:      &mockMessage{role: RoleAssistant, content: "Response " + string(rune('0'+callCount))},
 				FinishReason: FinishReasonStop,
 			}, nil
 		},
@@ -744,8 +744,8 @@ func TestChat_ChatWithState_ContinuesFromExistingState(t *testing.T) {
 	// Verify message order
 	expectedContent := []string{"First message", "Response 1", "Second message"}
 	for i := 0; i < 3; i++ {
-		if receivedMessages[i].Content != expectedContent[i] {
-			t.Errorf("Message %d: expected '%s', got '%s'", i, expectedContent[i], receivedMessages[i].Content)
+		if receivedMessages[i].Content() != expectedContent[i] {
+			t.Errorf("Message %d: expected '%s', got '%s'", i, expectedContent[i], receivedMessages[i].Content())
 		}
 	}
 
@@ -763,7 +763,7 @@ func TestChat_ChatWithState_SystemMessagesNotPersisted(t *testing.T) {
 		providerName: "test-provider",
 		chatFunc: func(ctx context.Context, messages []Message, tools aitooling.ToolSet) (*ChatResponse, error) {
 			return &ChatResponse{
-				Message:      Message{Role: RoleAssistant, Content: "ok"},
+				Message:      &mockMessage{role: RoleAssistant, content: "ok"},
 				FinishReason: FinishReasonStop,
 			}, nil
 		},
@@ -787,7 +787,7 @@ func TestChat_ChatWithState_SystemMessagesNotPersisted(t *testing.T) {
 	messages := chat.decodeState(context.Background(), state)
 
 	for _, msg := range messages {
-		if msg.Role == RoleSystem {
+		if msg.Role() == RoleSystem {
 			t.Error("System message should not be persisted in state")
 		}
 	}
@@ -807,7 +807,7 @@ func TestChat_ChatWithState_SystemMessagesPrependedEachTurn(t *testing.T) {
 		chatFunc: func(ctx context.Context, messages []Message, tools aitooling.ToolSet) (*ChatResponse, error) {
 			receivedMessages = messages
 			return &ChatResponse{
-				Message:      Message{Role: RoleAssistant, Content: "ok"},
+				Message:      &mockMessage{role: RoleAssistant, content: "ok"},
 				FinishReason: FinishReasonStop,
 			}, nil
 		},
@@ -832,12 +832,12 @@ func TestChat_ChatWithState_SystemMessagesPrependedEachTurn(t *testing.T) {
 	)
 
 	// Backend should receive system message at the start
-	if receivedMessages[0].Role != RoleSystem {
+	if receivedMessages[0].Role() != RoleSystem {
 		t.Error("First message should be system message")
 	}
 
-	if receivedMessages[0].Content != "System prompt 2" {
-		t.Errorf("Expected 'System prompt 2', got '%s'", receivedMessages[0].Content)
+	if receivedMessages[0].Content() != "System prompt 2" {
+		t.Errorf("Expected 'System prompt 2', got '%s'", receivedMessages[0].Content())
 	}
 }
 
@@ -847,7 +847,7 @@ func TestChat_DecodeState_ProviderMismatch_DiscardsState(t *testing.T) {
 	backend1 := &mockBackend{providerName: "provider-a"}
 	chat1 := &Chat{Backend: backend1}
 	state, _ := chat1.encodeState([]Message{
-		{Role: RoleUser, Content: "test"},
+		backend1.NewUserMessage("test"),
 	})
 
 	// Try to decode with different provider
@@ -884,8 +884,8 @@ func TestChat_UpdateStateAfterEvent_AddsEventToState(t *testing.T) {
 
 	// Create initial state
 	initialState, _ := chat.encodeState([]Message{
-		{Role: RoleUser, Content: "Hello"},
-		{Role: RoleAssistant, Content: "Hi!"},
+		backend.NewUserMessage("Hello"),
+		&mockMessage{role: RoleAssistant, content: "Hi!"},
 	})
 
 	// Add event
@@ -907,12 +907,12 @@ func TestChat_UpdateStateAfterEvent_AddsEventToState(t *testing.T) {
 	}
 
 	lastMessage := messages[len(messages)-1]
-	if lastMessage.Role != RoleUser {
-		t.Errorf("Event should be added as user message, got %s", lastMessage.Role)
+	if lastMessage.Role() != RoleUser {
+		t.Errorf("Event should be added as user message, got %s", lastMessage.Role())
 	}
 
-	if lastMessage.Content != "User visited location X" {
-		t.Errorf("Event content not preserved, got '%s'", lastMessage.Content)
+	if lastMessage.Content() != "User visited location X" {
+		t.Errorf("Event content not preserved, got '%s'", lastMessage.Content())
 	}
 }
 
@@ -937,7 +937,7 @@ func TestChat_UpdateStateAfterEvent_NilState_CreatesNewState(t *testing.T) {
 		t.Fatalf("Expected 1 message, got %d", len(messages))
 	}
 
-	if messages[0].Content != "Initial event" {
+	if messages[0].Content() != "Initial event" {
 		t.Error("Event content not preserved")
 	}
 }
@@ -948,7 +948,7 @@ func TestChat_DelegatesToChatWithState(t *testing.T) {
 		providerName: "test",
 		chatFunc: func(ctx context.Context, messages []Message, tools aitooling.ToolSet) (*ChatResponse, error) {
 			return &ChatResponse{
-				Message:      Message{Role: RoleAssistant, Content: "response"},
+				Message:      &mockMessage{role: RoleAssistant, content: "response"},
 				FinishReason: FinishReasonStop,
 			}, nil
 		},

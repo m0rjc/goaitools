@@ -353,7 +353,7 @@ func TestClient_ChatCompletion_Integration(t *testing.T) {
 	result, err := client.ChatCompletion(
 		context.Background(),
 		[]goaitools.Message{
-			{Role: goaitools.RoleUser, Content: "Test"},
+			client.NewUserMessage("Test"),
 		},
 		aitooling.ToolSet{},
 	)
@@ -362,8 +362,8 @@ func TestClient_ChatCompletion_Integration(t *testing.T) {
 		t.Fatalf("Expected no error, got %v", err)
 	}
 
-	if result.Message.Content != "Hello from mock server" {
-		t.Errorf("Expected mock response, got '%s'", result.Message.Content)
+	if result.Message.Content() != "Hello from mock server" {
+		t.Errorf("Expected mock response, got '%s'", result.Message.Content())
 	}
 
 	if result.FinishReason != goaitools.FinishReasonStop {
