@@ -2,6 +2,26 @@
 
 This document explains how `goaitools` implements stateful multi-turn conversations.
 
+**Status**: Implemented in version 0.3.0-beta.1 (feature/stateful-chats branch)
+
+## Implementation Status
+
+### ✅ Fully Implemented
+- **Core state management**: `ChatWithState()`, `AppendToState()`
+- **System message handling**: Leading system messages not persisted, mid-conversation messages preserved
+- **State persistence**: Opaque `[]byte` with JSON encoding, versioning, provider-locking
+- **Graceful degradation**: Invalid/corrupted/mismatched state silently discarded
+- **Message limit compaction**: `MessageLimitCompactor` keeps last N messages
+- **Token limit compaction**: `TokenLimitCompactor` uses actual API token usage
+- **Composite strategies**: `CompositeCompactor`, `SplitCompactor` for flexible composition
+- **Working examples**: `example/hellowithstate/`, `example/statecompaction/`
+- **Comprehensive documentation**: This file, CLAUDE.md, specification.md
+
+### 🔮 Future Enhancements (Deferred)
+- **LLM-powered summarization**: Compactor that asks AI to summarize old messages
+- **Tool exchange summarization**: Specialized handling for tool call sequences
+- **TokenCounter interface**: Pluggable token counting (current implementation uses API token usage directly)
+
 ## Overview
 
 The `ChatWithState()` API enables multi-turn conversations with state persistence, similar to OpenAI's session memory pattern. State is stored as an opaque `[]byte` that clients can persist between calls.
