@@ -58,6 +58,14 @@ type ToolCall struct {
 	Arguments string `json:"arguments"` // JSON arguments for the function
 }
 
+// TokenUsage represents token consumption information from an API call.
+// Backends that don't provide token usage will leave this nil.
+type TokenUsage struct {
+	PromptTokens     int // Tokens used in the prompt
+	CompletionTokens int // Tokens used in the completion
+	TotalTokens      int // Total tokens used (prompt + completion)
+}
+
 // ChatResponse represents a single API response from a chat completion.
 // The response may contain tool_calls (requiring further iteration)
 // or a final text response (conversation complete).
@@ -67,6 +75,9 @@ type ChatResponse struct {
 
 	// FinishReason indicates why the model stopped
 	FinishReason FinishReason
+
+	// Usage contains token consumption information (may be nil if backend doesn't provide it)
+	Usage *TokenUsage
 }
 
 // SystemLogger provides context-aware logging for library internals.

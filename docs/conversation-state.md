@@ -69,6 +69,7 @@ State is stored as JSON with the following structure:
 {
   "version": 1,
   "provider": "openai",
+  "processed_length": 2,
   "messages": [
     {"role": "user", "content": "..."},
     {"role": "assistant", "content": "..."}
@@ -86,6 +87,133 @@ The `version` field allows detecting incompatible state format changes. Currentl
 ### Provider Field
 
 State is **provider-locked** - state created with OpenAI cannot be used with Anthropic. This prevents cross-provider compatibility issues.
+
+### Processed Length Field
+
+The system tracks the amount of messages seen by the LLM, excluding messages appended using `AppendToState()`. This is to allow a future
+mechanism for pre-compaction should the amount of appended messages become large. From the TODO comment in code:
+
+> TODO: Consider if we want to perform a compaction run if messages were added since the last LLM call.
+This would be cheap and effective for a max message length compactor, but expensive and possibly unnecessary
+for a summarising compactor. A better approach may to to offer a SummarisePendingMessages method so that the
+caller can decide.
+
+## Conversation History Compaction
+
+![Compaction interfaces](compaction.png)
+
+As conversations grow longer, they consume more tokens and may eventually exceed API limits. The compaction system provides flexible strategies for managing conversation history size.
+
+### Compaction Interface
+
+The `Compactor` interface allows custom strategies for deciding when and how to compact:
+
+```go
+type Compactor interface {
+    Compact(ctx context.Context, req *CompactionRequest) (*CompactionResponse, error)
+}
+```
+
+Compaction occurs automatically after each successful chat completion (when finish reason is "stop"). The compactor receives:
+- **StateMessages**: Current conversation history (excluding leading system messages)
+- **LeadingSystemMessages**: The system preamble (for context, but not compacted)
+- **LastAPIUsage**: Token usage from the most recent API call (if available)
+- **Backend**: The backend being used (allows provider-specific strategies)
+
+### Built-in Compactors
+
+**MessageLimitCompactor** - Keeps only the last N messages:
+
+```go
+chat := &goaitools.Chat{
+    Backend: client,
+    Compactor: &goaitools.MessageLimitCompactor{
+        MaxMessages: 20, // Keep last 20 messages
+    },
+}
+```
+
+**TokenLimitCompactor** - Removes messages when token count exceeds limit:
+
+```go
+chat := &goaitools.Chat{
+    Backend: client,
+    Compactor: &goaitools.TokenLimitCompactor{
+        MaxTokens:    4000, // Trigger compaction above 4000 tokens
+        TargetTokens: 3000, // Compact down to 3000 tokens (75% of max if not specified)
+    },
+}
+```
+
+### Composite Compaction Strategies
+
+Use `CompositeCompactor` to try multiple strategies in order:
+
+```go
+chat := &goaitools.Chat{
+    Backend: client,
+    Compactor: &goaitools.CompositeCompactor{
+        Compactors: []goaitools.Compactor{
+            &goaitools.TokenLimitCompactor{MaxTokens: 8000},
+            &goaitools.MessageLimitCompactor{MaxMessages: 50},
+        },
+    },
+}
+// Compacts if EITHER token limit OR message limit is exceeded
+```
+
+### Custom Compaction
+
+For advanced use cases, separate the trigger (when) from the strategy (how):
+
+* The `CompactionTrigger` interface specifies when to compact.
+* The `CompactionStrategy` interface specifies how to compact.
+* The `SplitCompactor` is a Compactor that combines a Trigger and a Strategy.
+
+A Composite Pattern is provided for the `CompactionTrigger` interface to allow multiple triggers.
+
+Both packaged Compactors implement the `CompactionTrigger` and `CompactionStrategy` interfaces, so can be used
+in either place.
+
+```go
+// Custom trigger that compacts every 10 messages
+type Every10MessagesTrigger struct{}
+
+func (t *Every10MessagesTrigger) ShouldCompact(ctx context.Context, req *goaitools.CompactionRequest) (bool, error) {
+    return len(req.StateMessages) >= 10, nil
+}
+
+// Use with any strategy
+// This Compactor will truncate to 5 messages using the MessageLimitCompactor, but runs every 10 messages.
+chat := &goaitools.Chat{
+    Backend: client,
+    Compactor: &goaitools.SplitCompactor{
+        Trigger:  &Every10MessagesTrigger{},
+        Strategy: &goaitools.MessageLimitCompactor{MaxMessages: 5},
+    },
+}
+```
+
+You can also implement the full `Compactor` interface for complete control (e.g., AI-powered summarization).
+
+### Compaction Boundaries
+
+Compaction should always occur at user message boundaries. The public method `AdvanceToFirstUserMessage()` is provided to support this.
+This follows OpenAI's recommendation to maintain proper conversation structure. The two supplied Compactors follow this convention.
+
+### When Compaction Occurs
+
+- **After successful chat completion**: When `FinishReason` is "stop"
+- **Before encoding state**: Compaction happens before state is serialized
+- **Not during tool calls**: Compaction is skipped during multi-turn tool execution loops
+- **Logged automatically**: Compaction events are logged via `SystemLogger` if configured
+
+### No Compaction
+
+If `Chat.Compactor` is `nil` (the default), no compaction occurs and conversation history grows unbounded. This is suitable for:
+- Short conversations
+- Applications with external state management
+- When conversation length is controlled by application logic
 
 ## Forward Compatibility
 
@@ -120,7 +248,14 @@ type Backend interface {
 
 ## API Usage Patterns
 
-See the examples folder for sample code. This code also acts as an integration test for the system.
+See `example/hellowithstate/` for a complete working demonstration showing:
+- Multi-turn conversations with `ChatWithState()`
+- State persistence across turns
+- Dynamic system messages (including timestamps)
+- Using `AppendToState()` to add context without API calls
+- System message behavior (not stored in state)
+
+The examples folder contains sample code that also acts as integration tests for the system.
 
 ## Error Handling
 

@@ -627,7 +627,7 @@ func TestChat_StateEncodingDecoding_RoundTrip(t *testing.T) {
 	}
 
 	// Encode
-	state, err := chat.encodeState(originalMessages)
+	state, err := chat.encodeState(originalMessages, len(originalMessages))
 	if err != nil {
 		t.Fatalf("Failed to encode state: %v", err)
 	}
@@ -637,7 +637,7 @@ func TestChat_StateEncodingDecoding_RoundTrip(t *testing.T) {
 	}
 
 	// Decode
-	decodedMessages := chat.decodeState(context.Background(), state)
+	decodedMessages, _ := chat.decodeState(context.Background(), state)
 
 	if len(decodedMessages) != len(originalMessages) {
 		t.Fatalf("Expected %d messages, got %d", len(originalMessages), len(decodedMessages))
@@ -784,7 +784,7 @@ func TestChat_ChatWithState_SystemMessagesNotPersisted(t *testing.T) {
 	}
 
 	// Decode state and verify system message is NOT present
-	messages := chat.decodeState(context.Background(), state)
+	messages, _ := chat.decodeState(context.Background(), state)
 
 	for _, msg := range messages {
 		if msg.Role() == RoleSystem {
@@ -848,12 +848,12 @@ func TestChat_DecodeState_ProviderMismatch_DiscardsState(t *testing.T) {
 	chat1 := &Chat{Backend: backend1}
 	state, _ := chat1.encodeState([]Message{
 		backend1.NewUserMessage("test"),
-	})
+	}, 1)
 
 	// Try to decode with different provider
 	backend2 := &mockBackend{providerName: "provider-b"}
 	chat2 := &Chat{Backend: backend2}
-	messages := chat2.decodeState(context.Background(), state)
+	messages, _ := chat2.decodeState(context.Background(), state)
 
 	// Should return nil (graceful degradation)
 	if messages != nil {
@@ -869,7 +869,7 @@ func TestChat_DecodeState_InvalidState_ReturnsNil(t *testing.T) {
 	// Corrupt state
 	invalidState := ConversationState([]byte("not valid json"))
 
-	messages := chat.decodeState(context.Background(), invalidState)
+	messages, _ := chat.decodeState(context.Background(), invalidState)
 
 	// Should return nil (graceful degradation)
 	if messages != nil {
@@ -877,8 +877,8 @@ func TestChat_DecodeState_InvalidState_ReturnsNil(t *testing.T) {
 	}
 }
 
-// Test: UpdateStateAfterEvent adds event to state
-func TestChat_UpdateStateAfterEvent_AddsEventToState(t *testing.T) {
+// Test: AppendToState adds event to state
+func TestChat_AppendToState_AddsEventToState(t *testing.T) {
 	backend := &mockBackend{providerName: "test"}
 	chat := &Chat{Backend: backend}
 
@@ -886,13 +886,13 @@ func TestChat_UpdateStateAfterEvent_AddsEventToState(t *testing.T) {
 	initialState, _ := chat.encodeState([]Message{
 		backend.NewUserMessage("Hello"),
 		&mockMessage{role: RoleAssistant, content: "Hi!"},
-	})
+	}, 2)
 
 	// Add event
-	newState := chat.UpdateStateAfterEvent(
+	newState := chat.AppendToState(
 		context.Background(),
 		initialState,
-		"User visited location X",
+		WithUserMessage("User visited location X"),
 	)
 
 	if newState == nil {
@@ -900,7 +900,7 @@ func TestChat_UpdateStateAfterEvent_AddsEventToState(t *testing.T) {
 	}
 
 	// Decode and verify event was added
-	messages := chat.decodeState(context.Background(), newState)
+	messages, _ := chat.decodeState(context.Background(), newState)
 
 	if len(messages) != 3 {
 		t.Fatalf("Expected 3 messages, got %d", len(messages))
@@ -916,22 +916,22 @@ func TestChat_UpdateStateAfterEvent_AddsEventToState(t *testing.T) {
 	}
 }
 
-// Test: UpdateStateAfterEvent works with nil state
-func TestChat_UpdateStateAfterEvent_NilState_CreatesNewState(t *testing.T) {
+// Test: AppendToState works with nil state
+func TestChat_AppendToState_NilState_CreatesNewState(t *testing.T) {
 	backend := &mockBackend{providerName: "test"}
 	chat := &Chat{Backend: backend}
 
-	newState := chat.UpdateStateAfterEvent(
+	newState := chat.AppendToState(
 		context.Background(),
 		nil, // nil state
-		"Initial event",
+		WithUserMessage("Initial event"),
 	)
 
 	if newState == nil {
 		t.Fatal("Expected non-nil state")
 	}
 
-	messages := chat.decodeState(context.Background(), newState)
+	messages, _ := chat.decodeState(context.Background(), newState)
 
 	if len(messages) != 1 {
 		t.Fatalf("Expected 1 message, got %d", len(messages))

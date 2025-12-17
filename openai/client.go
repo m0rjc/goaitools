@@ -212,6 +212,11 @@ func (c *Client) ChatCompletion(
 	return &goaitools.ChatResponse{
 		Message:      responseMessage,
 		FinishReason: goaitools.FinishReason(choice.FinishReason),
+		Usage: &goaitools.TokenUsage{
+			PromptTokens:     resp.Usage.PromptTokens,
+			CompletionTokens: resp.Usage.CompletionTokens,
+			TotalTokens:      resp.Usage.TotalTokens,
+		},
 	}, nil
 }
 
