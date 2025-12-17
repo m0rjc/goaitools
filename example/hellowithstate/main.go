@@ -13,28 +13,16 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/m0rjc/goaitools"
-	"github.com/m0rjc/goaitools/openai"
+	"github.com/m0rjc/goaitools/example/shared"
 )
 
 func main() {
-	readDotEnv()
-
-	// Get API key from environment
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		log.Fatal("OPENAI_API_KEY environment variable not set")
-	}
-
-	// Create OpenAI client and chat
-	client, err := openai.NewClient(apiKey)
-	if err != nil {
-		log.Fatalf("Failed to create OpenAI client: %v", err)
-	}
+	shared.ReadDotEnv()
+	client := shared.CreateOpenAIClient()
 
 	chat := &goaitools.Chat{
 		Backend:          client,

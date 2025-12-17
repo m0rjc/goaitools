@@ -12,22 +12,16 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 
 	"github.com/m0rjc/goaitools"
 	"github.com/m0rjc/goaitools/aitooling"
-	"github.com/m0rjc/goaitools/openai"
+	"github.com/m0rjc/goaitools/example/shared"
 )
 
 func main() {
-	readDotEnv()
-
-	// Get API key from environment
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		log.Fatal("OPENAI_API_KEY environment variable not set")
-	}
+	shared.ReadDotEnv()
+	client := shared.CreateOpenAIClient()
 
 	// Create game instance
 	game := NewGame()
@@ -36,12 +30,6 @@ func main() {
 	tools := aitooling.ToolSet{
 		NewReadGameTool(game),
 		NewWriteGameTool(game),
-	}
-
-	// Create OpenAI client and chat
-	client, err := openai.NewClient(apiKey)
-	if err != nil {
-		log.Fatalf("Failed to create OpenAI client: %v", err)
 	}
 
 	chat := &goaitools.Chat{
