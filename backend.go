@@ -14,6 +14,7 @@ const (
 	RoleUser      Role = "user"      // Message from the user
 	RoleAssistant Role = "assistant" // Message from the AI assistant
 	RoleTool      Role = "tool"      // Tool execution result
+	RoleOther     Role = "other"     // Other types of messages known to the backend but not by the Chat class
 )
 
 // FinishReason indicates why the model stopped generating.

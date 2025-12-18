@@ -94,6 +94,24 @@ Complete demonstration of:
 
 Implements a travel planning assistant that maintains conversation context across multiple turns.
 
+### Example Command-Line Usage
+
+All examples support the following command-line flags:
+
+```bash
+# Use a specific model
+./hellowithtools --model gpt-4
+
+# Configure request parameters (e.g., for gpt-5-nano)
+./hellowithtools --model gpt-5-nano --request-params '{"max_completion_tokens":1500}'
+
+# Combine model and parameters
+./hellowithtools --model gpt-4 --request-params '{"temperature":0.8,"max_tokens":2048}'
+
+# Standard parameters
+./hellowithtools --request-params '{"temperature":0.7,"max_tokens":1024,"top_p":0.95}'
+```
+
 ## Core Architecture
 
 ### 1. Backend Interface (Provider Abstraction)
@@ -249,6 +267,44 @@ if err != nil {
 - Model: `gpt-4o-mini` (cost-effective)
 - Timeout: 30 seconds
 - Base URL: `https://api.openai.com/v1`
+- Request parameters: None (uses API defaults for temperature, max_tokens, etc.)
+
+**Model-Specific Request Parameters**:
+
+Different models may require or prefer different request parameters. The library allows you to configure default request parameters that will be merged into all API requests:
+
+```go
+// Configure standard parameters
+client, err := openai.NewClientWithOptions(
+    apiKey,
+    openai.WithTemperature(0.7),
+    openai.WithMaxTokens(2048),
+)
+
+// Configure model-specific parameters (e.g., gpt-5-nano)
+client, err := openai.NewClientWithOptions(
+    apiKey,
+    openai.WithModel("gpt-5-nano"),
+    openai.WithRequestParam("max_completion_tokens", 1500),
+    // Some models don't accept temperature, so omit it
+)
+
+// Configure multiple parameters at once
+client, err := openai.NewClientWithOptions(
+    apiKey,
+    openai.WithRequestParams(map[string]interface{}{
+        "temperature":           0.8,
+        "max_completion_tokens": 2000,
+        "top_p":                 0.95,
+    }),
+)
+```
+
+**Important Notes**:
+- If no request parameters are configured, the library omits them from requests and the API uses its own defaults
+- Request parameters are merged into the request JSON before sending
+- Parameters already set in the base request (model, messages, tools) are never overwritten
+- This approach supports any model-specific parameters without requiring library updates
 
 ## Stateful Conversations
 

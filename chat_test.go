@@ -653,6 +653,60 @@ func TestChat_StateEncodingDecoding_RoundTrip(t *testing.T) {
 	}
 }
 
+// Test: RoleOther messages are correctly round-tripped through state
+func TestChat_StateEncodingDecoding_RoleOtherRoundTrip(t *testing.T) {
+	backend := &mockBackend{
+		providerName: "test-provider",
+	}
+
+	chat := &Chat{Backend: backend}
+
+	// Create conversation with various message types including RoleOther
+	originalMessages := []Message{
+		backend.NewUserMessage("Hello"),
+		&mockMessage{role: RoleAssistant, content: "Hi there!"},
+		&mockMessage{role: RoleOther, content: "Thinking: I should respond politely"},
+		backend.NewUserMessage("How are you?"),
+		&mockMessage{role: RoleAssistant, content: "I'm doing well"},
+		&mockMessage{role: RoleOther, content: "Internal reasoning about the conversation"},
+	}
+
+	// Encode
+	state, err := chat.encodeState(originalMessages, len(originalMessages))
+	if err != nil {
+		t.Fatalf("Failed to encode state with RoleOther messages: %v", err)
+	}
+
+	if state == nil || len(state) == 0 {
+		t.Fatal("Encoded state should not be empty")
+	}
+
+	// Decode
+	decodedMessages, _ := chat.decodeState(context.Background(), state)
+
+	if len(decodedMessages) != len(originalMessages) {
+		t.Fatalf("Expected %d messages, got %d", len(originalMessages), len(decodedMessages))
+	}
+
+	// Verify all messages including RoleOther are preserved
+	for i, msg := range decodedMessages {
+		if msg.Role() != originalMessages[i].Role() {
+			t.Errorf("Message %d: expected role %s, got %s", i, originalMessages[i].Role(), msg.Role())
+		}
+		if msg.Content() != originalMessages[i].Content() {
+			t.Errorf("Message %d: expected content %s, got %s", i, originalMessages[i].Content(), msg.Content())
+		}
+	}
+
+	// Specifically verify RoleOther messages
+	if decodedMessages[2].Role() != RoleOther {
+		t.Errorf("Message 2 should be RoleOther, got %s", decodedMessages[2].Role())
+	}
+	if decodedMessages[5].Role() != RoleOther {
+		t.Errorf("Message 5 should be RoleOther, got %s", decodedMessages[5].Role())
+	}
+}
+
 // Test: ChatWithState with nil state starts new conversation
 func TestChat_ChatWithState_NilStateStartsNewConversation(t *testing.T) {
 	var receivedMessages []Message

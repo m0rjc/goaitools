@@ -98,6 +98,9 @@ func TestRole_Constants(t *testing.T) {
 	if RoleTool != "tool" {
 		t.Errorf("RoleTool should be 'tool', got '%s'", RoleTool)
 	}
+	if RoleOther != "other" {
+		t.Errorf("RoleOther should be 'other', got '%s'", RoleOther)
+	}
 }
 
 // Test: FinishReason constants are type-safe strings

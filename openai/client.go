@@ -25,11 +25,12 @@ var ErrMissingAPIKey = errors.New("API key is required")
 
 // Client is an OpenAI API client.
 type Client struct {
-	apiKey       string
-	baseURL      string
-	model        string
-	httpClient   *http.Client
-	systemLogger goaitools.SystemLogger // For system/debug logging
+	apiKey         string
+	baseURL        string
+	model          string
+	httpClient     *http.Client
+	systemLogger   goaitools.SystemLogger    // For system/debug logging
+	requestDefaults map[string]interface{}    // Default request parameters (temperature, max_tokens, etc.)
 }
 
 // NewClient creates a new OpenAI client with the given API key.
@@ -46,6 +47,7 @@ func NewClient(apiKey string) (*Client, error) {
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 		},
+		requestDefaults: make(map[string]interface{}),
 	}, nil
 }
 
@@ -80,6 +82,37 @@ func WithHTTPClient(httpClient *http.Client) ClientOption {
 	}
 }
 
+// WithTemperature sets the default temperature for requests.
+func WithTemperature(temperature float64) ClientOption {
+	return func(c *Client) {
+		c.requestDefaults["temperature"] = temperature
+	}
+}
+
+// WithMaxTokens sets the default max_tokens for requests.
+func WithMaxTokens(maxTokens int) ClientOption {
+	return func(c *Client) {
+		c.requestDefaults["max_tokens"] = maxTokens
+	}
+}
+
+// WithRequestParam sets an arbitrary request parameter.
+// Use this for model-specific parameters like max_completion_tokens.
+func WithRequestParam(key string, value interface{}) ClientOption {
+	return func(c *Client) {
+		c.requestDefaults[key] = value
+	}
+}
+
+// WithRequestParams sets multiple request parameters at once.
+func WithRequestParams(params map[string]interface{}) ClientOption {
+	return func(c *Client) {
+		for k, v := range params {
+			c.requestDefaults[k] = v
+		}
+	}
+}
+
 // NewClientWithOptions creates a client with functional options.
 // Returns ErrMissingAPIKey if apiKey is empty.
 func NewClientWithOptions(apiKey string, opts ...ClientOption) (*Client, error) {
@@ -94,6 +127,7 @@ func NewClientWithOptions(apiKey string, opts ...ClientOption) (*Client, error) 
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 		},
+		requestDefaults: make(map[string]interface{}),
 	}
 
 	for _, opt := range opts {
@@ -168,11 +202,9 @@ func (c *Client) ChatCompletion(
 
 	// Build request
 	req := ChatCompletionRequest{
-		Model:       c.model,
-		Messages:    openaiMessages,
-		Tools:       mapToolset(tools),
-		Temperature: 0.7,
-		MaxTokens:   1024,
+		Model:    c.model,
+		Messages: openaiMessages,
+		Tools:    mapToolset(tools),
 	}
 
 	// Make ONE API call (no loop!)
@@ -222,9 +254,10 @@ func (c *Client) ChatCompletion(
 
 // sendRequest sends a single API request and returns the response.
 func (c *Client) sendRequest(ctx context.Context, req ChatCompletionRequest) (*ChatCompletionResponse, error) {
-	body, err := json.Marshal(req)
+	// Marshal base request to JSON, then merge with defaults
+	body, err := c.mergeRequestDefaults(req)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, fmt.Errorf("prepare request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(
@@ -265,6 +298,31 @@ func (c *Client) sendRequest(ctx context.Context, req ChatCompletionRequest) (*C
 	}
 
 	return &chatResp, nil
+}
+
+// mergeRequestDefaults marshals the base request and merges in requestDefaults.
+// This allows arbitrary model-specific parameters to be added to requests.
+func (c *Client) mergeRequestDefaults(req ChatCompletionRequest) ([]byte, error) {
+	// Marshal base request to map
+	baseJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal base request: %w", err)
+	}
+
+	var requestMap map[string]interface{}
+	if err := json.Unmarshal(baseJSON, &requestMap); err != nil {
+		return nil, fmt.Errorf("unmarshal to map: %w", err)
+	}
+
+	// Merge defaults (only if not already set in base request)
+	for key, value := range c.requestDefaults {
+		if _, exists := requestMap[key]; !exists {
+			requestMap[key] = value
+		}
+	}
+
+	// Marshal merged request
+	return json.Marshal(requestMap)
 }
 
 // mapToolset converts aitooling.ToolSet to OpenAI API tool format.
