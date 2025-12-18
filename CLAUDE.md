@@ -56,17 +56,24 @@ go fmt ./...
 │   ├── logger.go           # Logging abstraction
 │   └── logger_test.go      # Tests for logger and client options
 ├── example/                # Working examples
-│   └── hellowithtools/     # Complete demonstration of tool usage
+│   ├── hellowithtools/     # Complete demonstration of tool usage
+│   └── hellowithstate/     # Stateful conversation demonstration
 ├── backend.go              # Backend interface (provider abstraction)
 ├── chat.go                 # High-level Chat API with functional options
+├── compactor.go            # Compaction interfaces and utilities
+├── message_limit_compactor.go  # Message count-based compaction
+├── token_limit_compactor.go    # Token usage-based compaction
+├── compactor_test.go       # Compaction tests
 ├── go.mod
 ├── LICENSE
 └── README.md
 ```
 
-## Working Example
+## Working Examples
 
-See `example/hellowithtools/` for a complete working demonstration of:
+### Tools Example (`example/hellowithtools/`)
+
+Complete demonstration of:
 - Creating and registering AI tools
 - Using the Chat API with functional options
 - Logging tool actions for audit and user feedback
@@ -74,7 +81,36 @@ See `example/hellowithtools/` for a complete working demonstration of:
 - JSON schema definition
 - Error handling strategies
 
-The example implements a simple game configuration system with read/write tools that demonstrate all key patterns in this library.
+Implements a simple game configuration system with read/write tools that demonstrate all key patterns.
+
+### Stateful Conversations Example (`example/hellowithstate/`)
+
+Complete demonstration of:
+- Multi-turn conversations with `ChatWithState()`
+- State persistence across turns
+- Dynamic system messages (timestamps, user context)
+- Using `AppendToState()` to add context without API calls
+- System message behavior (not stored in state)
+
+Implements a travel planning assistant that maintains conversation context across multiple turns.
+
+### Example Command-Line Usage
+
+All examples support the following command-line flags:
+
+```bash
+# Use a specific model
+./hellowithtools --model gpt-4
+
+# Configure request parameters (e.g., for gpt-5-nano)
+./hellowithtools --model gpt-5-nano --request-params '{"max_completion_tokens":1500}'
+
+# Combine model and parameters
+./hellowithtools --model gpt-4 --request-params '{"temperature":0.8,"max_tokens":2048}'
+
+# Standard parameters
+./hellowithtools --request-params '{"temperature":0.7,"max_tokens":1024,"top_p":0.95}'
+```
 
 ## Core Architecture
 
@@ -118,7 +154,41 @@ type Tool interface {
 
 **Note on Transaction Awareness**: An earlier version included transaction-aware result methods (`NewReadOnlyResult()`, `NewDatabaseModifiedResult()`). This concept was removed as it wasn't found useful in practice - each tool now manages its own transactions as needed.
 
-### 3. Automatic Tool-Calling Loop
+### 3. Conversation History Compaction
+
+The compaction system manages conversation state size as conversations grow longer:
+
+**Compactor Interface** - Main abstraction for compaction:
+
+```go
+type Compactor interface {
+    Compact(ctx context.Context, req *CompactionRequest) (*CompactionResponse, error)
+}
+```
+
+**Composition Pattern** - Separate "when" from "how":
+
+- `CompactionTrigger` - Decides when to compact (e.g., message count, token count)
+- `CompactionStrategy` - Decides how to compact (e.g., truncate, summarize)
+- `SplitCompactor` - Combines trigger and strategy
+- `CompositeCompactor` - Tries multiple compactors in order
+
+**Built-in Compactors**:
+
+- `MessageLimitCompactor` - Keeps last N messages when limit exceeded
+- `TokenLimitCompactor` - Removes messages when token usage exceeds threshold
+
+**Key Design Principles**:
+
+- Compaction is **optional** (`Chat.Compactor` can be `nil`)
+- Always compacts at **user message boundaries** (via `AdvanceToFirstUserMessage`)
+- Receives full context including leading system messages (for AI-powered summarization)
+- Runs automatically after successful completion (when `FinishReason` is "stop")
+- Token usage from API responses enables intelligent compaction decisions
+
+**Custom Compaction**: Implement `Compactor` interface for advanced strategies (AI-powered summarization, semantic importance, etc.)
+
+### 4. Automatic Tool-Calling Loop
 
 The `openai.Client` implements a full conversation loop:
 
@@ -129,7 +199,7 @@ The `openai.Client` implements a full conversation loop:
 
 **Implementation**: See `openai/client.go:chatCompletionWithToolsInternal()`
 
-### 4. High-Level Chat API
+### 5. High-Level Chat API
 
 The `Chat` type provides functional options pattern for easy usage. See `example/hellowithtools/main.go` for a complete example demonstrating:
 - Creating tools with `aitooling.ToolSet`
@@ -197,12 +267,91 @@ if err != nil {
 - Model: `gpt-4o-mini` (cost-effective)
 - Timeout: 30 seconds
 - Base URL: `https://api.openai.com/v1`
+- Request parameters: None (uses API defaults for temperature, max_tokens, etc.)
 
-## Known Limitations
+**Model-Specific Request Parameters**:
 
-### Stateless Conversations
+Different models may require or prefer different request parameters. The library allows you to configure default request parameters that will be merged into all API requests:
 
-Currently, each `Chat()` call is stateless - conversation history is not preserved between calls. This is acceptable for single-turn interactions but problematic for multi-turn conversations.
+```go
+// Configure standard parameters
+client, err := openai.NewClientWithOptions(
+    apiKey,
+    openai.WithTemperature(0.7),
+    openai.WithMaxTokens(2048),
+)
+
+// Configure model-specific parameters (e.g., gpt-5-nano)
+client, err := openai.NewClientWithOptions(
+    apiKey,
+    openai.WithModel("gpt-5-nano"),
+    openai.WithRequestParam("max_completion_tokens", 1500),
+    // Some models don't accept temperature, so omit it
+)
+
+// Configure multiple parameters at once
+client, err := openai.NewClientWithOptions(
+    apiKey,
+    openai.WithRequestParams(map[string]interface{}{
+        "temperature":           0.8,
+        "max_completion_tokens": 2000,
+        "top_p":                 0.95,
+    }),
+)
+```
+
+**Important Notes**:
+- If no request parameters are configured, the library omits them from requests and the API uses its own defaults
+- Request parameters are merged into the request JSON before sending
+- Parameters already set in the base request (model, messages, tools) are never overwritten
+- This approach supports any model-specific parameters without requiring library updates
+
+## Stateful Conversations
+
+The library supports multi-turn conversations via `ChatWithState()`:
+
+```go
+// Multi-turn conversation with state persistence
+response, state, err := chat.ChatWithState(ctx, previousState, opts...)
+```
+
+**Key Design Decisions:**
+
+- **System messages are NOT stored in state** (following OpenAI's session memory pattern)
+- Pass system message on every call via `WithSystemMessage()` - allows dynamic content (timestamps, user context)
+- State only contains conversation history (user/assistant/tool messages)
+- State is opaque `[]byte` - clients store it but don't inspect it
+- Graceful degradation: invalid/corrupted state is silently discarded
+- Provider-locked: state from one backend cannot be used with another
+
+**Managing Conversation Length:**
+
+Configure a `Compactor` to automatically manage conversation state size:
+
+```go
+chat := &goaitools.Chat{
+    Backend: client,
+    Compactor: &goaitools.TokenLimitCompactor{
+        MaxTokens:    8000,
+        TargetTokens: 6000,
+    },
+}
+```
+
+Compaction runs automatically after successful completion. No compactor = unbounded growth.
+
+**Event Updates:**
+
+```go
+newState := chat.AppendToState(ctx, state,
+    goaitools.WithUserMessage("User visited location X"))
+```
+
+Adds context to conversation without making an LLM API call.
+
+**Backward Compatibility:**
+
+The original stateless `Chat()` method still works - it delegates to `ChatWithState(ctx, nil, opts...)`.
 
 ## Origins
 

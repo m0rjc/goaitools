@@ -2,10 +2,15 @@ package goaitools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/m0rjc/goaitools/aitooling"
 )
+
+// ConversationState is an opaque blob representing conversation history.
+// Clients should treat this as a black box - store it, retrieve it, but don't inspect it.
+type ConversationState []byte
 
 type Chat struct {
 	Backend           Backend
@@ -13,6 +18,16 @@ type Chat struct {
 	SystemLogger      SystemLogger     // Optional logger for system/debug logging
 	ToolActionLogger  aitooling.Logger // Optional default logger for tool actions
 	LogToolArguments  bool             // If true, log tool call arguments and responses at DEBUG level
+	Compactor         Compactor        // Optional compactor for managing conversation state size (nil = no compaction)
+}
+
+// conversationStateInternal is the internal representation of conversation state.
+// This is not exposed to clients - they only see the opaque []byte.
+type conversationStateInternal struct {
+	Version         int               `json:"version"`          // State format version (current: 1)
+	Provider        string            `json:"provider"`         // Backend provider name (e.g., "openai")
+	ProcessedLength int               `json:"processed_length"` // The amount of messages that have been processed in a ChatResponse, excluding later appended messages
+	Messages        []json.RawMessage `json:"messages"`         // Conversation history (opaque provider-specific messages)
 }
 
 type chatRequest struct {
@@ -22,48 +37,81 @@ type chatRequest struct {
 	maxToolIterations *int // Pointer to distinguish between "not set" and "set to 0"
 }
 
-// ChatOption is a function that configures a chatRequestConfig.
-type ChatOption func(*chatRequest)
+// MessageFactory is the subset of Backend interface needed for creating messages.
+// This follows the interface segregation principle.
+type MessageFactory interface {
+	NewSystemMessage(content string) Message
+	NewUserMessage(content string) Message
+	NewToolMessage(toolCallID, content string) Message
+}
+
+// ChatOption is a function that configures a chatRequest.
+// It receives a MessageFactory to create provider-specific messages.
+type ChatOption func(*chatRequest, MessageFactory)
 
 func WithToolActionLogger(callback aitooling.Logger) ChatOption {
-	return func(cfg *chatRequest) {
+	return func(cfg *chatRequest, _ MessageFactory) {
 		cfg.logCallback = callback
 	}
 }
 
 func WithTools(tools aitooling.ToolSet) ChatOption {
-	return func(cfg *chatRequest) {
+	return func(cfg *chatRequest, _ MessageFactory) {
 		cfg.tools = tools
 	}
 }
 
 func WithSystemMessage(text string) ChatOption {
-	return func(cfg *chatRequest) {
-		cfg.messages = append(cfg.messages, Message{
-			Role:    RoleSystem,
-			Content: text,
-		})
+	return func(cfg *chatRequest, factory MessageFactory) {
+		cfg.messages = append(cfg.messages, factory.NewSystemMessage(text))
 	}
 }
 
 func WithUserMessage(text string) ChatOption {
-	return func(cfg *chatRequest) {
-		cfg.messages = append(cfg.messages, Message{
-			Role:    RoleUser,
-			Content: text,
-		})
+	return func(cfg *chatRequest, factory MessageFactory) {
+		cfg.messages = append(cfg.messages, factory.NewUserMessage(text))
 	}
 }
 
 // WithMaxToolIterations sets the maximum number of tool-calling iterations for this chat request.
 // This overrides the Chat.MaxToolIterations setting for this specific request.
 func WithMaxToolIterations(max int) ChatOption {
-	return func(cfg *chatRequest) {
+	return func(cfg *chatRequest, _ MessageFactory) {
 		cfg.maxToolIterations = &max
 	}
 }
 
-func (c *Chat) Chat(ctx context.Context, opts ...ChatOption) (string, error) {
+// ChatWithState performs a chat with conversation history.
+// Parameters:
+//   - ctx: Standard Go context
+//   - state: Opaque conversation state from previous turn (nil for new conversation)
+//   - opts: Chat options (messages, tools, logger)
+//
+// Returns:
+//   - response: AI's text response
+//   - newState: Updated conversation state for next turn
+//   - error: Any errors during execution
+//
+// System Message Handling:
+// Following OpenAI's session memory pattern, LEADING system messages (via WithSystemMessage)
+// are NOT stored in state. They should be passed on every call and will be prepended
+// to the stored conversation. This allows system prompts to include dynamic content
+// (timestamps, user context) that updates each turn. When you call again with a new
+// leading SystemMsg, it will be prepended to the stored state.
+//
+// Mid-conversation system messages (e.g., from WithSystemMessage after a WithUserMessage,
+// or inline in the conversation flow) ARE preserved in state. This allows contextual
+// system messages like "User has checked in at Location X" to be retained.
+//
+// Example: If you call with [SystemMsg, UserMsg, SystemMsg], state will contain
+// [UserMsg, SystemMsg] - only the leading system message is stripped. On the next
+// call with [NewSystemMsg, UserMsg2], the API receives [NewSystemMsg, UserMsg,
+// SystemMsg, UserMsg2].
+func (c *Chat) ChatWithState(
+	ctx context.Context,
+	state ConversationState,
+	opts ...ChatOption,
+) (string, ConversationState, error) {
 	// Build configuration from options
 	request := chatRequest{
 		messages:    []Message{},
@@ -71,8 +119,19 @@ func (c *Chat) Chat(ctx context.Context, opts ...ChatOption) (string, error) {
 		logCallback: nil,
 	}
 	for _, opt := range opts {
-		opt(&request)
+		opt(&request, c.Backend) // Backend implements MessageFactory interface
 	}
+
+	// Decode existing state (conversation history only, no system messages)
+	stateMessages, _ := c.decodeState(ctx, state)
+
+	// Build messages: system message (if any) + state history + new user messages
+	messages := c.buildMessages(request.messages, stateMessages)
+
+	// TODO: Consider if we want to perform a compaction run if messages were added since the last LLM call.
+	// This would be cheap and effective for a max message length compactor, but expensive and possibly unnecessary
+	// for a summarising compactor. A better approach may to to offer a SummarisePendingMessages method so that the
+	// caller can decide.
 
 	// Use Chat-level default logger if no per-request logger provided
 	toolLogger := request.logCallback
@@ -87,11 +146,7 @@ func (c *Chat) Chat(ctx context.Context, opts ...ChatOption) (string, error) {
 	// Determine max iterations: per-call option > Chat field > default (10)
 	maxIter := c.resolveMaxIterations(request.maxToolIterations)
 
-	// Make a copy of messages to build conversation
-	messages := make([]Message, len(request.messages))
-	copy(messages, request.messages)
-
-	// Tool-calling loop (moved from backend to here)
+	// Tool-calling loop
 	for iteration := 0; iteration < maxIter; iteration++ {
 		c.logDebug(ctx, "starting_chat_iteration", "iteration", iteration)
 
@@ -99,7 +154,7 @@ func (c *Chat) Chat(ctx context.Context, opts ...ChatOption) (string, error) {
 		response, err := c.Backend.ChatCompletion(ctx, messages, request.tools)
 		if err != nil {
 			c.logError(ctx, "chat_completion_failed", err, "iteration", iteration)
-			return "", err
+			return "", nil, err
 		}
 
 		// Add assistant's response to conversation
@@ -108,33 +163,187 @@ func (c *Chat) Chat(ctx context.Context, opts ...ChatOption) (string, error) {
 		// Check finish reason
 		switch response.FinishReason {
 		case FinishReasonStop:
-			// Normal completion, return text
+			// Normal completion, compact if needed, then encode state and return
 			c.logDebug(ctx, "chat_completed", "iteration", iteration)
-			return response.Message.Content, nil
+
+			// Strip leading system messages from state
+			stateMessages := c.stripLeadingSystemMessages(messages)
+
+			// Compact if compactor is configured
+			if c.Compactor != nil {
+				compacted, err := c.Compactor.Compact(ctx, &CompactionRequest{
+					StateMessages:         stateMessages,
+					LeadingSystemMessages: c.extractLeadingSystemMessages(messages),
+					LastAPIUsage:          response.Usage,
+					Backend:               c.Backend,
+				})
+				if err != nil {
+					c.logError(ctx, "compaction_failed", err)
+					return "", nil, fmt.Errorf("compaction failed: %w", err)
+				}
+				if compacted.WasCompacted {
+					c.logInfo(ctx, "conversation_compacted",
+						"original_message_count", len(stateMessages),
+						"compacted_message_count", len(compacted.StateMessages))
+					stateMessages = compacted.StateMessages
+				}
+			}
+
+			// Encode state
+			newState, err := c.encodeState(stateMessages, len(stateMessages))
+			if err != nil {
+				c.logError(ctx, "state_encoding_failed", err)
+				return "", nil, err
+			}
+			return response.Message.Content(), newState, nil
 
 		case FinishReasonToolCalls:
 			// Execute tools and continue loop
-			c.logDebug(ctx, "executing_tools", "iteration", iteration, "count", len(response.Message.ToolCalls))
-			toolResults, err := c.executeTools(ctx, iteration, response.Message.ToolCalls, request.tools, toolLogger)
+			c.logDebug(ctx, "executing_tools", "iteration", iteration, "count", len(response.Message.ToolCalls()))
+			toolResults, err := c.executeTools(ctx, iteration, response.Message.ToolCalls(), request.tools, toolLogger)
 			if err != nil {
 				c.logError(ctx, "tool_execution_failed", err, "iteration", iteration)
-				return "", err
+				return "", nil, err
 			}
 			messages = append(messages, toolResults...)
 			continue
 
 		case FinishReasonLength:
 			c.logError(ctx, "max_tokens_exceeded", nil)
-			return "", fmt.Errorf("conversation exceeded max tokens")
+			return "", nil, fmt.Errorf("conversation exceeded max tokens")
 
 		default:
 			c.logError(ctx, "unknown_finish_reason", nil, "reason", response.FinishReason)
-			return "", fmt.Errorf("unknown finish reason: %s", response.FinishReason)
+			return "", nil, fmt.Errorf("unknown finish reason: %s", response.FinishReason)
 		}
 	}
 
 	c.logError(ctx, "max_iterations_exceeded", nil, "max", maxIter)
-	return "", fmt.Errorf("exceeded max tool iterations (%d)", maxIter)
+	return "", nil, fmt.Errorf("exceeded max tool iterations (%d)", maxIter)
+}
+
+// buildMessages constructs the full message list for the API call.
+// Order: leading system messages from opts + state history + remaining non-system messages from opts
+// This allows fresh system "preamble" on each call while preserving inline system messages in state.
+func (c *Chat) buildMessages(optMessages []Message, stateMessages []Message) []Message {
+	// Separate leading system messages from other messages in opts
+	var leadingSystemMessages []Message
+	var otherOptMessages []Message
+
+	// Find all leading system messages
+	foundNonSystem := false
+	for _, msg := range optMessages {
+		if !foundNonSystem && msg.Role() == RoleSystem {
+			leadingSystemMessages = append(leadingSystemMessages, msg)
+		} else {
+			foundNonSystem = true
+			otherOptMessages = append(otherOptMessages, msg)
+		}
+	}
+
+	// Build final order: leading system + state + other opts
+	result := make([]Message, 0, len(leadingSystemMessages)+len(stateMessages)+len(otherOptMessages))
+	result = append(result, leadingSystemMessages...)
+	result = append(result, stateMessages...)
+	result = append(result, otherOptMessages...)
+	return result
+}
+
+// stripLeadingSystemMessages removes only the leading system messages from the message list.
+// Everything from the first non-system message onward is preserved (including any inline system messages).
+// Used when encoding state - allows caller to provide fresh "preamble" system messages on each call
+// while preserving mid-conversation system messages (like event notifications).
+//
+// Example: {1S, 2S, 3U, 4S, 5U} → {3U, 4S, 5U}
+func (c *Chat) stripLeadingSystemMessages(messages []Message) []Message {
+	// Find first non-system message
+	firstNonSystem := -1
+	for i, msg := range messages {
+		if msg.Role() != RoleSystem {
+			firstNonSystem = i
+			break
+		}
+	}
+
+	// If all messages are system messages (or empty), return empty
+	if firstNonSystem == -1 {
+		return nil
+	}
+
+	// Return slice from first non-system message onward
+	return messages[firstNonSystem:]
+}
+
+// extractLeadingSystemMessages returns only the leading system messages from the message list.
+// This is the inverse of stripLeadingSystemMessages.
+// Used when providing context to compactors.
+//
+// Example: {1S, 2S, 3U, 4S, 5U} → {1S, 2S}
+func (c *Chat) extractLeadingSystemMessages(messages []Message) []Message {
+	// Find first non-system message
+	firstNonSystem := -1
+	for i, msg := range messages {
+		if msg.Role() != RoleSystem {
+			firstNonSystem = i
+			break
+		}
+	}
+
+	// If no system messages at start (or all messages are system), return appropriate slice
+	if firstNonSystem == -1 {
+		// All messages are system messages
+		return messages
+	}
+	if firstNonSystem == 0 {
+		// No leading system messages
+		return nil
+	}
+
+	// Return slice up to first non-system message
+	return messages[:firstNonSystem]
+}
+
+// Chat performs a stateless chat (existing behavior).
+// This is a convenience wrapper around ChatWithState with nil state.
+func (c *Chat) Chat(ctx context.Context, opts ...ChatOption) (string, error) {
+	response, _, err := c.ChatWithState(ctx, nil, opts...)
+	return response, err
+}
+
+// AppendToState adds messages to the state for storage. This is used to add contextual messages between user
+// interactive AI calls without calling the LLM. For example if the user records arrival at a location in the
+// game world this information can be logged so that they can ask about their location.
+//
+// Only message generation chat options are honoured. Tool and other options will be ignored.
+// ALL specified messages are appended. Do not include the system message here.
+// Claude recommends the use of User Messages to store information like "The user has arrived at The Railway Station".
+func (c *Chat) AppendToState(ctx context.Context, state ConversationState, opts ...ChatOption) ConversationState {
+	request := chatRequest{
+		messages:    []Message{},
+		tools:       aitooling.ToolSet{},
+		logCallback: nil,
+	}
+	for _, opt := range opts {
+		opt(&request, c.Backend) // Backend implements MessageFactory interface
+	}
+
+	// Decode existing state
+	messages, processedLength := c.decodeState(ctx, state)
+	if messages == nil {
+		messages = []Message{}
+	}
+
+	// Append event as a user message using backend factory
+	messages = append(messages, request.messages...)
+
+	// Encode and return new state. Processed Length is preserved to not include the new messages
+	newState, err := c.encodeState(messages, processedLength)
+	if err != nil {
+		c.logError(ctx, "event_state_encoding_failed", err)
+		return nil
+	}
+
+	return newState
 }
 
 // resolveMaxIterations determines the max iterations to use.
@@ -203,11 +412,7 @@ func (c *Chat) executeTools(ctx context.Context, iteration int, toolCalls []Tool
 			)
 		}
 
-		toolMessages = append(toolMessages, Message{
-			Role:       RoleTool,
-			Content:    resultContent,
-			ToolCallID: call.ID,
-		})
+		toolMessages = append(toolMessages, c.Backend.NewToolMessage(call.ID, resultContent))
 	}
 
 	return toolMessages, nil
@@ -232,6 +437,78 @@ func (c *Chat) logError(ctx context.Context, msg string, err error, keysAndValue
 	if c.SystemLogger != nil {
 		c.SystemLogger.Error(ctx, msg, err, keysAndValues...)
 	}
+}
+
+// encodeState serializes conversation state to an opaque blob.
+func (c *Chat) encodeState(messages []Message, processed_len int) (ConversationState, error) {
+	if c.Backend == nil {
+		return nil, fmt.Errorf("backend is nil")
+	}
+
+	// Serialize each message to json.RawMessage using provider's MarshalJSON
+	rawMessages := make([]json.RawMessage, len(messages))
+	for i, msg := range messages {
+		data, err := msg.MarshalJSON()
+		if err != nil {
+			return nil, fmt.Errorf("marshal message %d: %w", i, err)
+		}
+		rawMessages[i] = data
+	}
+
+	internal := conversationStateInternal{
+		Version:  1,
+		Provider: c.Backend.ProviderName(),
+		Messages: rawMessages,
+	}
+
+	data, err := json.Marshal(internal)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode conversation state: %w", err)
+	}
+
+	return ConversationState(data), nil
+}
+
+// decodeState deserializes conversation state from an opaque blob.
+// Return the processed message length stored in the state
+// Returns nil messages if state is nil, corrupted, or incompatible with current backend.
+func (c *Chat) decodeState(ctx context.Context, state ConversationState) ([]Message, int) {
+	if state == nil || len(state) == 0 {
+		return nil, 0
+	}
+
+	var internal conversationStateInternal
+	if err := json.Unmarshal(state, &internal); err != nil {
+		c.logError(ctx, "invalid_conversation_state", err)
+		return nil, 0 // Graceful degradation: start fresh conversation
+	}
+
+	// Validate version
+	if internal.Version != 1 {
+		c.logError(ctx, "unsupported_state_version", nil, "version", internal.Version)
+		return nil, 0 // Graceful degradation: discard incompatible state
+	}
+
+	// Validate provider compatibility
+	if c.Backend != nil && internal.Provider != c.Backend.ProviderName() {
+		c.logError(ctx, "provider_mismatch", nil,
+			"state_provider", internal.Provider,
+			"current_provider", c.Backend.ProviderName())
+		return nil, 0 // Graceful degradation: discard incompatible state
+	}
+
+	// Deserialize each message using backend's UnmarshalMessage
+	messages := make([]Message, len(internal.Messages))
+	for i, raw := range internal.Messages {
+		msg, err := c.Backend.UnmarshalMessage(raw)
+		if err != nil {
+			c.logError(ctx, "message_unmarshal_failed", err, "index", i)
+			return nil, 0 // Graceful degradation: discard corrupted state
+		}
+		messages[i] = msg
+	}
+
+	return messages, internal.ProcessedLength
 }
 
 type dummyLogger struct{}

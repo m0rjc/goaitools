@@ -1,0 +1,107 @@
+@startuml Compaction System
+
+' Core interfaces
+interface Compactor {
+    + Compact(ctx, req): (response, error)
+}
+
+interface CompactionTrigger {
+    + ShouldCompact(ctx, request): (bool, error)
+}
+
+interface CompactionStrategy {
+    + CompactMessages(ctx, request): (response, error)
+}
+
+' Composition implementations
+class SplitCompactor {
+    + Trigger: CompactionTrigger
+    + Strategy: CompactionStrategy
+}
+
+class CompositeCompactor {
+    + Compactors: []Compactor
+}
+
+class CompositeCompactionTrigger {
+    + Triggers: []CompactionTrigger
+}
+
+' Built-in compactors
+class MessageLimitCompactor {
+    + MaxMessages: int
+    --
+    + Compact(ctx, req): (response, error)
+    + ShouldCompact(ctx, request): (bool, error)
+    + CompactMessages(ctx, req): (response, error)
+}
+
+class TokenLimitCompactor {
+    + MaxTokens: int
+    + TargetTokens: int
+    --
+    + Compact(ctx, req): (response, error)
+    + ShouldCompact(ctx, request): (bool, error)
+    + CompactMessages(ctx, req): (response, error)
+}
+
+' Interface implementations
+Compactor <|.. SplitCompactor
+Compactor <|.. CompositeCompactor
+Compactor <|.. MessageLimitCompactor
+Compactor <|.. TokenLimitCompactor
+
+CompactionTrigger <|.. CompositeCompactionTrigger
+CompactionTrigger <|.. MessageLimitCompactor
+CompactionTrigger <|.. TokenLimitCompactor
+
+CompactionStrategy <|.. MessageLimitCompactor
+CompactionStrategy <|.. TokenLimitCompactor
+
+' Composition relationships
+SplitCompactor o-- CompactionTrigger : uses
+SplitCompactor o-- CompactionStrategy : uses
+CompositeCompactor o-- Compactor : contains many
+CompositeCompactionTrigger o-- CompactionTrigger : contains many
+
+' Usage in Chat
+class Chat {
+    + Backend: Backend
+    + Compactor: Compactor
+    + MaxToolIterations: int
+    + SystemLogger: SystemLogger
+    + ToolActionLogger: Logger
+    + LogToolArguments: bool
+    --
+    + ChatWithState(ctx, state, opts): (string, state, error)
+    + Chat(ctx, opts): (string, error)
+    + AppendToState(ctx, state, opts): state
+}
+
+Chat o-- Compactor : optional
+
+note right of SplitCompactor
+  Combines any trigger with any strategy.
+  Allows custom "when" with built-in "how"
+  or vice versa.
+end note
+
+note right of MessageLimitCompactor
+  Implements all three interfaces.
+  Can be used standalone or as
+  part of a SplitCompactor.
+end note
+
+note right of CompositeCompactor
+  Tries compactors in order.
+  Returns result of first
+  compactor that compacts.
+end note
+
+note bottom of Chat
+  Compaction runs automatically after
+  successful chat completion.
+  Compactor is optional (nil = no compaction).
+end note
+
+@enduml

@@ -25,11 +25,12 @@ var ErrMissingAPIKey = errors.New("API key is required")
 
 // Client is an OpenAI API client.
 type Client struct {
-	apiKey       string
-	baseURL      string
-	model        string
-	httpClient   *http.Client
-	systemLogger goaitools.SystemLogger // For system/debug logging
+	apiKey         string
+	baseURL        string
+	model          string
+	httpClient     *http.Client
+	systemLogger   goaitools.SystemLogger    // For system/debug logging
+	requestDefaults map[string]interface{}    // Default request parameters (temperature, max_tokens, etc.)
 }
 
 // NewClient creates a new OpenAI client with the given API key.
@@ -46,6 +47,7 @@ func NewClient(apiKey string) (*Client, error) {
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 		},
+		requestDefaults: make(map[string]interface{}),
 	}, nil
 }
 
@@ -80,6 +82,37 @@ func WithHTTPClient(httpClient *http.Client) ClientOption {
 	}
 }
 
+// WithTemperature sets the default temperature for requests.
+func WithTemperature(temperature float64) ClientOption {
+	return func(c *Client) {
+		c.requestDefaults["temperature"] = temperature
+	}
+}
+
+// WithMaxTokens sets the default max_tokens for requests.
+func WithMaxTokens(maxTokens int) ClientOption {
+	return func(c *Client) {
+		c.requestDefaults["max_tokens"] = maxTokens
+	}
+}
+
+// WithRequestParam sets an arbitrary request parameter.
+// Use this for model-specific parameters like max_completion_tokens.
+func WithRequestParam(key string, value interface{}) ClientOption {
+	return func(c *Client) {
+		c.requestDefaults[key] = value
+	}
+}
+
+// WithRequestParams sets multiple request parameters at once.
+func WithRequestParams(params map[string]interface{}) ClientOption {
+	return func(c *Client) {
+		for k, v := range params {
+			c.requestDefaults[k] = v
+		}
+	}
+}
+
 // NewClientWithOptions creates a client with functional options.
 // Returns ErrMissingAPIKey if apiKey is empty.
 func NewClientWithOptions(apiKey string, opts ...ClientOption) (*Client, error) {
@@ -94,6 +127,7 @@ func NewClientWithOptions(apiKey string, opts ...ClientOption) (*Client, error) 
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 		},
+		requestDefaults: make(map[string]interface{}),
 	}
 
 	for _, opt := range opts {
@@ -101,6 +135,41 @@ func NewClientWithOptions(apiKey string, opts ...ClientOption) (*Client, error) 
 	}
 
 	return client, nil
+}
+
+// ProviderName returns the provider name for this backend.
+func (c *Client) ProviderName() string {
+	return "openai"
+}
+
+// Message factory methods - create provider-specific messages
+
+// NewSystemMessage creates a system message with the given content.
+func (c *Client) NewSystemMessage(content string) goaitools.Message {
+	msg, _ := newMessage(Message{Role: "system", Content: content})
+	return msg
+}
+
+// NewUserMessage creates a user message with the given content.
+func (c *Client) NewUserMessage(content string) goaitools.Message {
+	msg, _ := newMessage(Message{Role: "user", Content: content})
+	return msg
+}
+
+// NewToolMessage creates a tool result message.
+func (c *Client) NewToolMessage(toolCallID, content string) goaitools.Message {
+	msg, _ := newMessage(Message{
+		Role:       "tool",
+		Content:    content,
+		ToolCallID: toolCallID,
+	})
+	return msg
+}
+
+// UnmarshalMessage reconstructs a message from its serialized form.
+// Used when loading conversation state.
+func (c *Client) UnmarshalMessage(data []byte) (goaitools.Message, error) {
+	return unmarshalMessage(data)
 }
 
 // ChatCompletion makes a single API call and returns the response.
@@ -114,24 +183,28 @@ func (c *Client) ChatCompletion(
 ) (*goaitools.ChatResponse, error) {
 	c.logSystemDebug(ctx, "openai_request_start", "model", c.model, "message_count", len(messages))
 
-	// Convert goaitools.Message to openai.Message
+	// Extract OpenAI messages from interface
 	openaiMessages := make([]Message, len(messages))
 	for i, msg := range messages {
-		openaiMessages[i] = Message{
-			Role:       string(msg.Role),
-			Content:    msg.Content,
-			ToolCalls:  convertToolCallsToOpenAI(msg.ToolCalls),
-			ToolCallID: msg.ToolCallID,
+		// If it's our own message type, use parsed directly for efficiency
+		if m, ok := msg.(*message); ok {
+			openaiMessages[i] = m.parsed
+		} else {
+			// Fallback: reconstruct from interface (shouldn't happen in normal flow)
+			openaiMessages[i] = Message{
+				Role:       string(msg.Role()),
+				Content:    msg.Content(),
+				ToolCalls:  convertToolCallsToOpenAI(msg.ToolCalls()),
+				ToolCallID: msg.ToolCallID(),
+			}
 		}
 	}
 
 	// Build request
 	req := ChatCompletionRequest{
-		Model:       c.model,
-		Messages:    openaiMessages,
-		Tools:       mapToolset(tools),
-		Temperature: 0.7,
-		MaxTokens:   1024,
+		Model:    c.model,
+		Messages: openaiMessages,
+		Tools:    mapToolset(tools),
 	}
 
 	// Make ONE API call (no loop!)
@@ -156,24 +229,35 @@ func (c *Client) ChatCompletion(
 		"total_tokens", resp.Usage.TotalTokens,
 	)
 
-	// Convert OpenAI message back to goaitools.Message
-	responseMessage := goaitools.Message{
-		Role:      goaitools.Role(choice.Message.Role),
-		Content:   choice.Message.Content,
-		ToolCalls: convertToolCallsFromOpenAI(choice.Message.ToolCalls),
+	// Wrap the OpenAI message in our message type
+	// We need to preserve the raw JSON from the response
+	rawJSON, err := json.Marshal(choice.Message)
+	if err != nil {
+		return nil, fmt.Errorf("marshal response message: %w", err)
+	}
+
+	responseMessage := &message{
+		rawJSON: rawJSON,
+		parsed:  choice.Message,
 	}
 
 	return &goaitools.ChatResponse{
 		Message:      responseMessage,
 		FinishReason: goaitools.FinishReason(choice.FinishReason),
+		Usage: &goaitools.TokenUsage{
+			PromptTokens:     resp.Usage.PromptTokens,
+			CompletionTokens: resp.Usage.CompletionTokens,
+			TotalTokens:      resp.Usage.TotalTokens,
+		},
 	}, nil
 }
 
 // sendRequest sends a single API request and returns the response.
 func (c *Client) sendRequest(ctx context.Context, req ChatCompletionRequest) (*ChatCompletionResponse, error) {
-	body, err := json.Marshal(req)
+	// Marshal base request to JSON, then merge with defaults
+	body, err := c.mergeRequestDefaults(req)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, fmt.Errorf("prepare request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(
@@ -214,6 +298,31 @@ func (c *Client) sendRequest(ctx context.Context, req ChatCompletionRequest) (*C
 	}
 
 	return &chatResp, nil
+}
+
+// mergeRequestDefaults marshals the base request and merges in requestDefaults.
+// This allows arbitrary model-specific parameters to be added to requests.
+func (c *Client) mergeRequestDefaults(req ChatCompletionRequest) ([]byte, error) {
+	// Marshal base request to map
+	baseJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal base request: %w", err)
+	}
+
+	var requestMap map[string]interface{}
+	if err := json.Unmarshal(baseJSON, &requestMap); err != nil {
+		return nil, fmt.Errorf("unmarshal to map: %w", err)
+	}
+
+	// Merge defaults (only if not already set in base request)
+	for key, value := range c.requestDefaults {
+		if _, exists := requestMap[key]; !exists {
+			requestMap[key] = value
+		}
+	}
+
+	// Marshal merged request
+	return json.Marshal(requestMap)
 }
 
 // mapToolset converts aitooling.ToolSet to OpenAI API tool format.

@@ -353,7 +353,7 @@ func TestClient_ChatCompletion_Integration(t *testing.T) {
 	result, err := client.ChatCompletion(
 		context.Background(),
 		[]goaitools.Message{
-			{Role: goaitools.RoleUser, Content: "Test"},
+			client.NewUserMessage("Test"),
 		},
 		aitooling.ToolSet{},
 	)
@@ -362,12 +362,160 @@ func TestClient_ChatCompletion_Integration(t *testing.T) {
 		t.Fatalf("Expected no error, got %v", err)
 	}
 
-	if result.Message.Content != "Hello from mock server" {
-		t.Errorf("Expected mock response, got '%s'", result.Message.Content)
+	if result.Message.Content() != "Hello from mock server" {
+		t.Errorf("Expected mock response, got '%s'", result.Message.Content())
 	}
 
 	if result.FinishReason != goaitools.FinishReasonStop {
 		t.Errorf("Expected stop reason, got %s", result.FinishReason)
+	}
+}
+
+// Test: WithTemperature option sets temperature in request defaults
+func TestClientOptions_WithTemperature(t *testing.T) {
+	client, err := NewClientWithOptions("sk-test", WithTemperature(0.5))
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if temp, ok := client.requestDefaults["temperature"].(float64); !ok || temp != 0.5 {
+		t.Errorf("Expected temperature=0.5, got %v", client.requestDefaults["temperature"])
+	}
+}
+
+// Test: WithMaxTokens option sets max_tokens in request defaults
+func TestClientOptions_WithMaxTokens(t *testing.T) {
+	client, err := NewClientWithOptions("sk-test", WithMaxTokens(2048))
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if maxTokens, ok := client.requestDefaults["max_tokens"].(int); !ok || maxTokens != 2048 {
+		t.Errorf("Expected max_tokens=2048, got %v", client.requestDefaults["max_tokens"])
+	}
+}
+
+// Test: WithRequestParam sets arbitrary parameter
+func TestClientOptions_WithRequestParam(t *testing.T) {
+	client, err := NewClientWithOptions("sk-test", WithRequestParam("max_completion_tokens", 1500))
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if val, ok := client.requestDefaults["max_completion_tokens"].(int); !ok || val != 1500 {
+		t.Errorf("Expected max_completion_tokens=1500, got %v", client.requestDefaults["max_completion_tokens"])
+	}
+}
+
+// Test: WithRequestParams sets multiple parameters
+func TestClientOptions_WithRequestParams(t *testing.T) {
+	params := map[string]interface{}{
+		"temperature":            0.8,
+		"max_completion_tokens":  2000,
+		"top_p":                  0.9,
+	}
+
+	client, err := NewClientWithOptions("sk-test", WithRequestParams(params))
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if temp, ok := client.requestDefaults["temperature"].(float64); !ok || temp != 0.8 {
+		t.Errorf("Expected temperature=0.8, got %v", client.requestDefaults["temperature"])
+	}
+
+	if maxComp, ok := client.requestDefaults["max_completion_tokens"].(int); !ok || maxComp != 2000 {
+		t.Errorf("Expected max_completion_tokens=2000, got %v", client.requestDefaults["max_completion_tokens"])
+	}
+
+	if topP, ok := client.requestDefaults["top_p"].(float64); !ok || topP != 0.9 {
+		t.Errorf("Expected top_p=0.9, got %v", client.requestDefaults["top_p"])
+	}
+}
+
+// Test: Request parameters are merged into actual requests
+func TestClient_RequestParametersMerged(t *testing.T) {
+	var receivedRequest map[string]interface{}
+
+	// Create mock server that captures the request
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Capture request body
+		json.NewDecoder(r.Body).Decode(&receivedRequest)
+
+		// Return mock response
+		response := ChatCompletionResponse{
+			Choices: []Choice{
+				{
+					Message: Message{
+						Role:    "assistant",
+						Content: "Test response",
+					},
+					FinishReason: "stop",
+				},
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithOptions(
+		"sk-test",
+		WithBaseURL(server.URL),
+		WithTemperature(0.3),
+		WithMaxTokens(512),
+		WithRequestParam("max_completion_tokens", 1024),
+	)
+
+	if err != nil {
+		t.Fatalf("Expected no error creating client, got %v", err)
+	}
+
+	_, err = client.ChatCompletion(
+		context.Background(),
+		[]goaitools.Message{
+			client.NewUserMessage("Test"),
+		},
+		aitooling.ToolSet{},
+	)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Verify parameters were included in request
+	if temp, ok := receivedRequest["temperature"].(float64); !ok || temp != 0.3 {
+		t.Errorf("Expected temperature=0.3 in request, got %v", receivedRequest["temperature"])
+	}
+
+	if maxTokens, ok := receivedRequest["max_tokens"].(float64); !ok || maxTokens != 512 {
+		t.Errorf("Expected max_tokens=512 in request, got %v", receivedRequest["max_tokens"])
+	}
+
+	if maxComp, ok := receivedRequest["max_completion_tokens"].(float64); !ok || maxComp != 1024 {
+		t.Errorf("Expected max_completion_tokens=1024 in request, got %v", receivedRequest["max_completion_tokens"])
+	}
+}
+
+// Test: NewClient initializes empty requestDefaults
+func TestNewClient_InitializesRequestDefaults(t *testing.T) {
+	client, err := NewClient("sk-test")
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if client.requestDefaults == nil {
+		t.Error("Expected requestDefaults to be initialized")
+	}
+
+	if len(client.requestDefaults) != 0 {
+		t.Errorf("Expected empty requestDefaults, got %d entries", len(client.requestDefaults))
 	}
 }
 
