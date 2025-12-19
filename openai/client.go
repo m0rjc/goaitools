@@ -31,6 +31,7 @@ type Client struct {
 	httpClient     *http.Client
 	systemLogger   goaitools.SystemLogger    // For system/debug logging
 	requestDefaults map[string]interface{}    // Default request parameters (temperature, max_tokens, etc.)
+	payloadLogging bool                       // Enable detailed request/response payload logging
 }
 
 // NewClient creates a new OpenAI client with the given API key.
@@ -110,6 +111,15 @@ func WithRequestParams(params map[string]interface{}) ClientOption {
 		for k, v := range params {
 			c.requestDefaults[k] = v
 		}
+	}
+}
+
+// WithPayloadLogging enables detailed request/response payload logging via the system logger.
+// When enabled, the client will log the full request body and response body for debugging purposes.
+// Note: The API key is safe - it's in the Authorization header, not the request body.
+func WithPayloadLogging() ClientOption {
+	return func(c *Client) {
+		c.payloadLogging = true
 	}
 }
 
@@ -260,6 +270,11 @@ func (c *Client) sendRequest(ctx context.Context, req ChatCompletionRequest) (*C
 		return nil, fmt.Errorf("prepare request: %w", err)
 	}
 
+	// Log request body if payload logging is enabled
+	if c.payloadLogging {
+		c.logSystemDebug(ctx, "openai_request_body", "body", string(body))
+	}
+
 	httpReq, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
@@ -282,6 +297,13 @@ func (c *Client) sendRequest(ctx context.Context, req ChatCompletionRequest) (*C
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	// Log response body if payload logging is enabled
+	if c.payloadLogging {
+		c.logSystemDebug(ctx, "openai_response_body",
+			"status_code", resp.StatusCode,
+			"body", string(respBody))
 	}
 
 	if resp.StatusCode != http.StatusOK {
