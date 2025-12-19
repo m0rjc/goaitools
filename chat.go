@@ -173,6 +173,7 @@ func (c *Chat) ChatWithState(
 			if c.Compactor != nil {
 				compacted, err := c.Compactor.Compact(ctx, &CompactionRequest{
 					StateMessages:         stateMessages,
+					ProcessedLength:       len(stateMessages), // At this stage it is always all messages
 					LeadingSystemMessages: c.extractLeadingSystemMessages(messages),
 					LastAPIUsage:          response.Usage,
 					Backend:               c.Backend,
@@ -456,9 +457,10 @@ func (c *Chat) encodeState(messages []Message, processed_len int) (ConversationS
 	}
 
 	internal := conversationStateInternal{
-		Version:  1,
-		Provider: c.Backend.ProviderName(),
-		Messages: rawMessages,
+		Version:         1,
+		Provider:        c.Backend.ProviderName(),
+		Messages:        rawMessages,
+		ProcessedLength: processed_len,
 	}
 
 	data, err := json.Marshal(internal)

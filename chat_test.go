@@ -1024,3 +1024,86 @@ func TestChat_DelegatesToChatWithState(t *testing.T) {
 		t.Errorf("Expected 'response', got '%s'", response)
 	}
 }
+
+// Test: ProcessedLength is correctly serialized in state
+func TestChat_StateEncodingDecoding_ProcessedLength(t *testing.T) {
+	backend := &mockBackend{
+		providerName: "test-provider",
+	}
+
+	chat := &Chat{Backend: backend}
+
+	// Create messages and encode with a specific ProcessedLength
+	messages := []Message{
+		backend.NewUserMessage("Message 1"),
+		&mockMessage{role: RoleAssistant, content: "Response 1"},
+		backend.NewUserMessage("Message 2"),
+		&mockMessage{role: RoleAssistant, content: "Response 2"},
+		backend.NewUserMessage("Message 3 - appended via AppendToState"),
+	}
+
+	// Encode with ProcessedLength = 4 (first 4 messages were seen by LLM, last message was appended)
+	expectedProcessedLength := 4
+	state, err := chat.encodeState(messages, expectedProcessedLength)
+	if err != nil {
+		t.Fatalf("Failed to encode state: %v", err)
+	}
+
+	// Decode the state as JSON to verify ProcessedLength was serialized
+	var internal conversationStateInternal
+	err = json.Unmarshal(state, &internal)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal state: %v", err)
+	}
+
+	// Verify ProcessedLength was correctly serialized
+	if internal.ProcessedLength != expectedProcessedLength {
+		t.Errorf("ProcessedLength in serialized state: expected %d, got %d", expectedProcessedLength, internal.ProcessedLength)
+	}
+
+	// Also verify via decodeState
+	_, decodedProcessedLength := chat.decodeState(context.Background(), state)
+	if decodedProcessedLength != expectedProcessedLength {
+		t.Errorf("ProcessedLength from decodeState: expected %d, got %d", expectedProcessedLength, decodedProcessedLength)
+	}
+}
+
+// Test: AppendToState preserves ProcessedLength
+func TestChat_AppendToState_PreservesProcessedLength(t *testing.T) {
+	backend := &mockBackend{providerName: "test"}
+	chat := &Chat{Backend: backend}
+
+	// Create initial state with 2 messages, both processed
+	initialMessages := []Message{
+		backend.NewUserMessage("Hello"),
+		&mockMessage{role: RoleAssistant, content: "Hi!"},
+	}
+	initialProcessedLength := 2
+	initialState, err := chat.encodeState(initialMessages, initialProcessedLength)
+	if err != nil {
+		t.Fatalf("Failed to encode initial state: %v", err)
+	}
+
+	// Append a new message (this should not increase ProcessedLength)
+	newState := chat.AppendToState(
+		context.Background(),
+		initialState,
+		WithUserMessage("User visited location X"),
+	)
+
+	if newState == nil {
+		t.Fatal("Expected non-nil state after event")
+	}
+
+	// Decode and verify ProcessedLength was preserved
+	messages, processedLength := chat.decodeState(context.Background(), newState)
+
+	if len(messages) != 3 {
+		t.Fatalf("Expected 3 messages, got %d", len(messages))
+	}
+
+	// ProcessedLength should still be 2 (the appended message is not processed yet)
+	if processedLength != initialProcessedLength {
+		t.Errorf("ProcessedLength should be preserved after AppendToState: expected %d, got %d", initialProcessedLength, processedLength)
+	}
+}
