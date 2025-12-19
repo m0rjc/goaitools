@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.1 - 2025-12-19
+
+### Added
+
+- The OpenAI Client can now log request/response payloads to DEBUG.  (Richard Corfield)
+- The samples allow timeout to be specified. GitHub Action added to run them as integration tests.
+- The count of messages seen by the LLM is passed to the Compactor. This was to help testing at first
+  but is in preparation for future plans to allow compaction of built up appended messages before an
+  LLM run.
+
+### Fixed
+
+- The serialised state did not contain a correct count of messages seen by the LLM.
+
 ## 0.3.0 - 2025-12-18
 
 ### Added
