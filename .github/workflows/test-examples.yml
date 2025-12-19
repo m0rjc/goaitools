@@ -53,7 +53,7 @@ jobs:
               echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
               cd "$example_dir"
-              if go run . --model gpt-5-nano; then
+              if go run . --model gpt-5-nano --timeout 60s; then
                 echo "✅ $example_name completed successfully"
               else
                 echo "❌ $example_name failed"

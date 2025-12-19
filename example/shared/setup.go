@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 
@@ -17,6 +18,7 @@ var (
 	// Command-line flags
 	modelFlag         = flag.String("model", "", "OpenAI model to use (default: gpt-4o-mini)")
 	requestParamsFlag = flag.String("request-params", "", "JSON string of request parameters (e.g., '{\"temperature\":0.7,\"max_tokens\":2048}')")
+	timeoutFlag       = flag.Duration("timeout", 0, "Timeout")
 )
 
 // ReadDotEnv loads environment variables from a .env file if it exists.
@@ -59,8 +61,10 @@ func loadEnv(filename string) error {
 // CreateOpenAIClient creates an OpenAI client from the OPENAI_API_KEY environment variable.
 // Calls log.Fatal if the API key is not set or client creation fails.
 // Supports command-line flags:
-//   --model: Specify the OpenAI model to use (default: gpt-4o-mini)
-//   --request-params: JSON string of request parameters (e.g., '{"temperature":0.7,"max_tokens":2048}')
+//
+//	--model: Specify the OpenAI model to use (default: gpt-4o-mini)
+//	--request-params: JSON string of request parameters (e.g., '{"temperature":0.7,"max_tokens":2048}')
+//	--timeout: HTTP timeout in seconds
 func CreateOpenAIClient() *openai.Client {
 	// Parse command-line flags
 	flag.Parse()
@@ -85,6 +89,12 @@ func CreateOpenAIClient() *openai.Client {
 			log.Fatalf("Failed to parse request-params JSON: %v", err)
 		}
 		opts = append(opts, openai.WithRequestParams(params))
+	}
+
+	if *timeoutFlag > 0 {
+		opts = append(opts, openai.WithHTTPClient(&http.Client{
+			Timeout: *timeoutFlag,
+		}))
 	}
 
 	// Create client with options (or default if no options)
