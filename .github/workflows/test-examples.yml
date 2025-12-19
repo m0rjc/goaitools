@@ -50,7 +50,7 @@ jobs:
               echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
               cd "$example_dir"
-              if go run . --model gpt-5-nano --request-params '{"max_completion_tokens":1500}'; then
+              if go run . --model gpt-5-nano; then
                 echo "✅ $example_name completed successfully"
               else
                 echo "❌ $example_name failed"
