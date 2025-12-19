@@ -8,6 +8,12 @@ type CompactionRequest struct {
 	// This excludes leading system messages.
 	StateMessages []Message
 
+	// ProcessedLength is the amount of StateMessages previously seen by the LLM.
+	// It excludes any messages added by Chat.AppendToState.
+	// This will always be len(StateMessages) when the compactor is called at the end of an
+	// LLM run.
+	ProcessedLength int
+
 	// LeadingSystemMessages contains the system preamble (not stored in state).
 	// Provided for context - useful if compactor needs to summarize with full context.
 	// May be empty (e.g., when compacting from UpdateStateAfterEvent or no system message in call).

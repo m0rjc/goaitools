@@ -1,0 +1,72 @@
+name: Test Examples
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  test-examples:
+    name: Run Examples with AI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Verify dependencies
+        run: go mod download && go mod verify
+
+      - name: Check for API key
+        id: check-key
+        run: |
+          if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+            echo "has_key=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_key=false" >> $GITHUB_OUTPUT
+            echo "⚠️ OPENAI_API_KEY not configured - skipping example tests"
+          fi
+
+      - name: Discover and run examples
+        if: steps.check-key.outputs.has_key == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          # Find all example directories (those containing main.go)
+          echo "🔍 Discovering examples..."
+          for example_dir in example/*/; do
+            if [ -f "${example_dir}main.go" ]; then
+              example_name=$(basename "$example_dir")
+              echo ""
+              echo "▶️  Running example: $example_name"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+              cd "$example_dir"
+              if go run . --model gpt-5-nano --timeout 60s; then
+                echo "✅ $example_name completed successfully"
+              else
+                echo "❌ $example_name failed"
+                exit 1
+              fi
+              cd - > /dev/null
+            fi
+          done
+
+          echo ""
+          echo "✨ All examples completed successfully"
+
+      - name: Examples skipped
+        if: steps.check-key.outputs.has_key == 'false'
+        run: |
+          echo "ℹ️  Example tests were skipped because OPENAI_API_KEY is not configured."
+          echo "   This is normal for pull requests from forks."
+          echo "   To enable example tests, add OPENAI_API_KEY as a repository secret."

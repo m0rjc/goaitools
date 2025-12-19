@@ -1,0 +1,61 @@
+# Example: OIDC-based authentication (for reference - OpenAI doesn't support this yet)
+#
+# If your AI provider supports OpenID Connect federation with GitHub Actions,
+# you can use this pattern to avoid storing API keys as secrets.
+#
+# Benefits:
+# - No long-lived credentials stored
+# - Automatic credential rotation
+# - Better audit trail
+# - Scoped permissions per workflow
+#
+# To use this pattern:
+# 1. Configure your AI provider to trust GitHub's OIDC provider
+# 2. Map GitHub repository/workflow to provider credentials
+# 3. Request tokens in your workflow as shown below
+
+name: Test Examples (OIDC)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+permissions:
+  id-token: write  # Required for OIDC token request
+  contents: read
+
+jobs:
+  test-examples:
+    name: Run Examples with AI (OIDC)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.25'
+          cache: true
+
+      # Example: Get credentials via OIDC (provider-specific)
+      - name: Configure AI Provider credentials
+        uses: example/configure-credentials@v1  # Replace with actual provider action
+        with:
+          role-to-assume: arn:xxx:xxx  # Provider-specific role/configuration
+
+      # The above step would set OPENAI_API_KEY environment variable
+      - name: Discover and run examples
+        run: |
+          for example_dir in example/*/; do
+            if [ -f "${example_dir}main.go" ]; then
+              example_name=$(basename "$example_dir")
+              echo "Running: $example_name"
+              cd "$example_dir"
+              go run . --model gpt-5-nano --request-params '{"max_completion_tokens":1500}'
+              cd - > /dev/null
+            fi
+          done
