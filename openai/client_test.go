@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -519,6 +520,180 @@ func TestNewClient_InitializesRequestDefaults(t *testing.T) {
 	}
 }
 
+// Test: WithPayloadLogging option enables payload logging
+func TestClientOptions_WithPayloadLogging(t *testing.T) {
+	client, err := NewClientWithOptions("sk-test", WithPayloadLogging())
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if !client.payloadLogging {
+		t.Error("Expected payloadLogging to be true")
+	}
+}
+
+// Test: Payload logging logs request and response bodies
+func TestClient_PayloadLogging_LogsRequestAndResponse(t *testing.T) {
+	// Create a mock logger to capture debug logs
+	mockLogger := &mockSystemLogger{
+		debugLogs: make([]debugLogEntry, 0),
+	}
+
+	// Create mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return mock response
+		response := ChatCompletionResponse{
+			Choices: []Choice{
+				{
+					Message: Message{
+						Role:    "assistant",
+						Content: "Test response",
+					},
+					FinishReason: "stop",
+				},
+			},
+			Usage: Usage{
+				PromptTokens:     10,
+				CompletionTokens: 5,
+				TotalTokens:      15,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithOptions(
+		"sk-test",
+		WithBaseURL(server.URL),
+		WithSystemLogger(mockLogger),
+		WithPayloadLogging(),
+	)
+
+	if err != nil {
+		t.Fatalf("Expected no error creating client, got %v", err)
+	}
+
+	_, err = client.ChatCompletion(
+		context.Background(),
+		[]goaitools.Message{
+			client.NewUserMessage("Test message"),
+		},
+		aitooling.ToolSet{},
+	)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Verify that request body was logged
+	foundRequestLog := false
+	foundResponseLog := false
+
+	for _, entry := range mockLogger.debugLogs {
+		if entry.msg == "openai_request_body" {
+			foundRequestLog = true
+			// Verify that the body contains expected content
+			if body, ok := entry.keysAndValues[1].(string); ok {
+				if !strings.Contains(body, "Test message") {
+					t.Error("Expected request body to contain user message")
+				}
+			} else {
+				t.Error("Expected body to be a string")
+			}
+		}
+
+		if entry.msg == "openai_response_body" {
+			foundResponseLog = true
+			// Verify that the body contains expected content
+			if body, ok := entry.keysAndValues[3].(string); ok {
+				if !strings.Contains(body, "Test response") {
+					t.Error("Expected response body to contain assistant response")
+				}
+			} else {
+				t.Error("Expected body to be a string")
+			}
+		}
+	}
+
+	if !foundRequestLog {
+		t.Error("Expected request body to be logged")
+	}
+
+	if !foundResponseLog {
+		t.Error("Expected response body to be logged")
+	}
+}
+
+// Test: Without payload logging, request/response bodies are not logged
+func TestClient_WithoutPayloadLogging_DoesNotLogBodies(t *testing.T) {
+	// Create a mock logger to capture debug logs
+	mockLogger := &mockSystemLogger{
+		debugLogs: make([]debugLogEntry, 0),
+	}
+
+	// Create mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return mock response
+		response := ChatCompletionResponse{
+			Choices: []Choice{
+				{
+					Message: Message{
+						Role:    "assistant",
+						Content: "Test response",
+					},
+					FinishReason: "stop",
+				},
+			},
+			Usage: Usage{
+				PromptTokens:     10,
+				CompletionTokens: 5,
+				TotalTokens:      15,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithOptions(
+		"sk-test",
+		WithBaseURL(server.URL),
+		WithSystemLogger(mockLogger),
+		// Note: NOT using WithPayloadLogging()
+	)
+
+	if err != nil {
+		t.Fatalf("Expected no error creating client, got %v", err)
+	}
+
+	_, err = client.ChatCompletion(
+		context.Background(),
+		[]goaitools.Message{
+			client.NewUserMessage("Test message"),
+		},
+		aitooling.ToolSet{},
+	)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Verify that request/response bodies were NOT logged
+	for _, entry := range mockLogger.debugLogs {
+		if entry.msg == "openai_request_body" {
+			t.Error("Expected request body NOT to be logged without payload logging enabled")
+		}
+
+		if entry.msg == "openai_response_body" {
+			t.Error("Expected response body NOT to be logged without payload logging enabled")
+		}
+	}
+}
+
 // mockTool for testing
 type mockTool struct {
 	name        string
@@ -531,4 +706,34 @@ func (m *mockTool) Description() string         { return m.description }
 func (m *mockTool) Parameters() json.RawMessage { return m.parameters }
 func (m *mockTool) Execute(ctx aitooling.ToolExecuteContext, req *aitooling.ToolRequest) (*aitooling.ToolResult, error) {
 	return req.NewResult("ok"), nil
+}
+
+// mockSystemLogger for testing
+type mockSystemLogger struct {
+	debugLogs []debugLogEntry
+	infoLogs  []debugLogEntry
+	errorLogs []errorLogEntry
+}
+
+type debugLogEntry struct {
+	msg           string
+	keysAndValues []interface{}
+}
+
+type errorLogEntry struct {
+	msg           string
+	err           error
+	keysAndValues []interface{}
+}
+
+func (m *mockSystemLogger) Debug(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	m.debugLogs = append(m.debugLogs, debugLogEntry{msg: msg, keysAndValues: keysAndValues})
+}
+
+func (m *mockSystemLogger) Info(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	m.infoLogs = append(m.infoLogs, debugLogEntry{msg: msg, keysAndValues: keysAndValues})
+}
+
+func (m *mockSystemLogger) Error(ctx context.Context, msg string, err error, keysAndValues ...interface{}) {
+	m.errorLogs = append(m.errorLogs, errorLogEntry{msg: msg, err: err, keysAndValues: keysAndValues})
 }
