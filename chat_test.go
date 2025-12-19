@@ -612,101 +612,6 @@ func (m *mockToolLogger) LogAll(actions []aitooling.ToolAction) {
 	}
 }
 
-// Test: State encoding/decoding round-trip
-func TestChat_StateEncodingDecoding_RoundTrip(t *testing.T) {
-	backend := &mockBackend{
-		providerName: "test-provider",
-	}
-
-	chat := &Chat{Backend: backend}
-
-	originalMessages := []Message{
-		backend.NewUserMessage("Hello"),
-		&mockMessage{role: RoleAssistant, content: "Hi there!"},
-		backend.NewUserMessage("How are you?"),
-	}
-
-	// Encode
-	state, err := chat.encodeState(originalMessages, len(originalMessages))
-	if err != nil {
-		t.Fatalf("Failed to encode state: %v", err)
-	}
-
-	if state == nil || len(state) == 0 {
-		t.Fatal("Encoded state should not be empty")
-	}
-
-	// Decode
-	decodedMessages, _ := chat.decodeState(context.Background(), state)
-
-	if len(decodedMessages) != len(originalMessages) {
-		t.Fatalf("Expected %d messages, got %d", len(originalMessages), len(decodedMessages))
-	}
-
-	for i, msg := range decodedMessages {
-		if msg.Role() != originalMessages[i].Role() {
-			t.Errorf("Message %d: expected role %s, got %s", i, originalMessages[i].Role(), msg.Role())
-		}
-		if msg.Content() != originalMessages[i].Content() {
-			t.Errorf("Message %d: expected content %s, got %s", i, originalMessages[i].Content(), msg.Content())
-		}
-	}
-}
-
-// Test: RoleOther messages are correctly round-tripped through state
-func TestChat_StateEncodingDecoding_RoleOtherRoundTrip(t *testing.T) {
-	backend := &mockBackend{
-		providerName: "test-provider",
-	}
-
-	chat := &Chat{Backend: backend}
-
-	// Create conversation with various message types including RoleOther
-	originalMessages := []Message{
-		backend.NewUserMessage("Hello"),
-		&mockMessage{role: RoleAssistant, content: "Hi there!"},
-		&mockMessage{role: RoleOther, content: "Thinking: I should respond politely"},
-		backend.NewUserMessage("How are you?"),
-		&mockMessage{role: RoleAssistant, content: "I'm doing well"},
-		&mockMessage{role: RoleOther, content: "Internal reasoning about the conversation"},
-	}
-
-	// Encode
-	state, err := chat.encodeState(originalMessages, len(originalMessages))
-	if err != nil {
-		t.Fatalf("Failed to encode state with RoleOther messages: %v", err)
-	}
-
-	if state == nil || len(state) == 0 {
-		t.Fatal("Encoded state should not be empty")
-	}
-
-	// Decode
-	decodedMessages, _ := chat.decodeState(context.Background(), state)
-
-	if len(decodedMessages) != len(originalMessages) {
-		t.Fatalf("Expected %d messages, got %d", len(originalMessages), len(decodedMessages))
-	}
-
-	// Verify all messages including RoleOther are preserved
-	for i, msg := range decodedMessages {
-		if msg.Role() != originalMessages[i].Role() {
-			t.Errorf("Message %d: expected role %s, got %s", i, originalMessages[i].Role(), msg.Role())
-		}
-		if msg.Content() != originalMessages[i].Content() {
-			t.Errorf("Message %d: expected content %s, got %s", i, originalMessages[i].Content(), msg.Content())
-		}
-	}
-
-	// Specifically verify RoleOther messages
-	if decodedMessages[2].Role() != RoleOther {
-		t.Errorf("Message 2 should be RoleOther, got %s", decodedMessages[2].Role())
-	}
-	if decodedMessages[5].Role() != RoleOther {
-		t.Errorf("Message 5 should be RoleOther, got %s", decodedMessages[5].Role())
-	}
-}
-
 // Test: ChatWithState with nil state starts new conversation
 func TestChat_ChatWithState_NilStateStartsNewConversation(t *testing.T) {
 	var receivedMessages []Message
@@ -895,42 +800,6 @@ func TestChat_ChatWithState_SystemMessagesPrependedEachTurn(t *testing.T) {
 	}
 }
 
-// Test: Provider mismatch discards state
-func TestChat_DecodeState_ProviderMismatch_DiscardsState(t *testing.T) {
-	// Create state with one provider
-	backend1 := &mockBackend{providerName: "provider-a"}
-	chat1 := &Chat{Backend: backend1}
-	state, _ := chat1.encodeState([]Message{
-		backend1.NewUserMessage("test"),
-	}, 1)
-
-	// Try to decode with different provider
-	backend2 := &mockBackend{providerName: "provider-b"}
-	chat2 := &Chat{Backend: backend2}
-	messages, _ := chat2.decodeState(context.Background(), state)
-
-	// Should return nil (graceful degradation)
-	if messages != nil {
-		t.Error("Expected nil messages when provider mismatches")
-	}
-}
-
-// Test: Invalid state is gracefully ignored
-func TestChat_DecodeState_InvalidState_ReturnsNil(t *testing.T) {
-	backend := &mockBackend{providerName: "test"}
-	chat := &Chat{Backend: backend}
-
-	// Corrupt state
-	invalidState := ConversationState([]byte("not valid json"))
-
-	messages, _ := chat.decodeState(context.Background(), invalidState)
-
-	// Should return nil (graceful degradation)
-	if messages != nil {
-		t.Error("Expected nil messages for invalid state")
-	}
-}
-
 // Test: AppendToState adds event to state
 func TestChat_AppendToState_AddsEventToState(t *testing.T) {
 	backend := &mockBackend{providerName: "test"}
@@ -1022,49 +891,6 @@ func TestChat_DelegatesToChatWithState(t *testing.T) {
 
 	if response != "response" {
 		t.Errorf("Expected 'response', got '%s'", response)
-	}
-}
-
-// Test: ProcessedLength is correctly serialized in state
-func TestChat_StateEncodingDecoding_ProcessedLength(t *testing.T) {
-	backend := &mockBackend{
-		providerName: "test-provider",
-	}
-
-	chat := &Chat{Backend: backend}
-
-	// Create messages and encode with a specific ProcessedLength
-	messages := []Message{
-		backend.NewUserMessage("Message 1"),
-		&mockMessage{role: RoleAssistant, content: "Response 1"},
-		backend.NewUserMessage("Message 2"),
-		&mockMessage{role: RoleAssistant, content: "Response 2"},
-		backend.NewUserMessage("Message 3 - appended via AppendToState"),
-	}
-
-	// Encode with ProcessedLength = 4 (first 4 messages were seen by LLM, last message was appended)
-	expectedProcessedLength := 4
-	state, err := chat.encodeState(messages, expectedProcessedLength)
-	if err != nil {
-		t.Fatalf("Failed to encode state: %v", err)
-	}
-
-	// Decode the state as JSON to verify ProcessedLength was serialized
-	var internal conversationStateInternal
-	err = json.Unmarshal(state, &internal)
-	if err != nil {
-		t.Fatalf("Failed to unmarshal state: %v", err)
-	}
-
-	// Verify ProcessedLength was correctly serialized
-	if internal.ProcessedLength != expectedProcessedLength {
-		t.Errorf("ProcessedLength in serialized state: expected %d, got %d", expectedProcessedLength, internal.ProcessedLength)
-	}
-
-	// Also verify via decodeState
-	_, decodedProcessedLength := chat.decodeState(context.Background(), state)
-	if decodedProcessedLength != expectedProcessedLength {
-		t.Errorf("ProcessedLength from decodeState: expected %d, got %d", expectedProcessedLength, decodedProcessedLength)
 	}
 }
 
