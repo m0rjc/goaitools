@@ -13,6 +13,7 @@ interface for game organisers and players. Its development is currently guided b
 - **Backend Abstraction** - Interface-based design supports multiple AI providers
 - **Action Logging** - Track tool executions for audit trails and user feedback
 - **System Logging** - Optional context-aware debug logging via `log/slog`
+- **Observability Hook** - `CompletionObserver` callback fires after each backend round-trip with token usage and conversation size
 - **Minimal Dependencies** - Only uses Go standard library
 
 ### Action Logging versus System Logging
@@ -225,6 +226,32 @@ func main() {
 - `NewSlogSystemLogger()` - Logs to Go's standard `log/slog` (recommended)
 - `NewSilentLogger()` - Disables all system logging
 - Custom implementation of `SystemLogger` interface for advanced use cases
+
+### Monitoring Token Usage (CompletionObserver)
+
+Set `Chat.CompletionObserver` to receive a callback after every backend round-trip. Use it to feed token-usage counters, conversation-size gauges, or any other observability pipeline:
+
+```go
+chat := &goaitools.Chat{
+    Backend: client,
+    CompletionObserver: func(ctx context.Context, usage *goaitools.TokenUsage, messageCount int) {
+        // usage may be nil — some backends omit token data
+        if usage != nil {
+            promptTokensCounter.Add(float64(usage.PromptTokens))
+            completionTokensCounter.Add(float64(usage.CompletionTokens))
+        }
+        conversationSizeGauge.Set(float64(messageCount))
+    },
+}
+```
+
+**Key points:**
+
+- Fires once per backend round-trip, **before** any compaction runs — `messageCount` reflects the pre-compaction size
+- `usage` is `*TokenUsage` and **may be nil**; always guard before dereferencing
+- Works alongside `Compactor`: use `messageCount` to verify the compactor is keeping state bounded
+
+See `example/observability/` for a runnable demo with cumulative totals and Prometheus-style comments.
 
 ### Type-Safe Constants
 
