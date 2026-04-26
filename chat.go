@@ -8,12 +8,13 @@ import (
 )
 
 type Chat struct {
-	Backend           Backend
-	MaxToolIterations int              // Default max iterations for tool-calling loop (0 = use default 10)
-	SystemLogger      SystemLogger     // Optional logger for system/debug logging
-	ToolActionLogger  aitooling.Logger // Optional default logger for tool actions
-	LogToolArguments  bool             // If true, log tool call arguments and responses at DEBUG level
-	Compactor         Compactor        // Optional compactor for managing conversation state size (nil = no compaction)
+	Backend             Backend
+	MaxToolIterations   int                 // Default max iterations for tool-calling loop (0 = use default 10)
+	SystemLogger        SystemLogger        // Optional logger for system/debug logging
+	ToolActionLogger    aitooling.Logger    // Optional default logger for tool actions
+	LogToolArguments    bool                // If true, log tool call arguments and responses at DEBUG level
+	Compactor           Compactor           // Optional compactor for managing conversation state size (nil = no compaction)
+	CompletionObserver  CompletionObserver  // Optional callback after each successful backend round-trip
 }
 
 type chatRequest struct {
@@ -145,6 +146,11 @@ func (c *Chat) ChatWithState(
 
 		// Add assistant's response to conversation
 		messages = append(messages, response.Message)
+
+		// Notify observer after each successful round-trip
+		if c.CompletionObserver != nil {
+			c.CompletionObserver(ctx, response.Usage, len(messages))
+		}
 
 		// Check finish reason
 		switch response.FinishReason {

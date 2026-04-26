@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 - 2026-04-26
+
+### Added
+
+- **CompletionObserver hook**: Set `Chat.CompletionObserver` to receive a callback after each successful backend round-trip. The callback receives `*TokenUsage` (may be nil if the backend omits token data) and the current message count before compaction. Useful for feeding Prometheus counters/gauges or any other observability pipeline. See `example/observability/` for a complete demonstration.
+
 ## 0.3.1 - 2025-12-19
 
 ### Added

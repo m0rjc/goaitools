@@ -81,6 +81,12 @@ type ChatResponse struct {
 	Usage *TokenUsage
 }
 
+// CompletionObserver is called after each successful backend round-trip.
+// usage may be nil if the backend does not report token counts.
+// messageCount is the number of messages in the conversation after this turn,
+// before any compaction runs.
+type CompletionObserver func(ctx context.Context, usage *TokenUsage, messageCount int)
+
 // SystemLogger provides context-aware logging for library internals.
 // Implementations can extract request IDs or other metadata from context.
 type SystemLogger interface {

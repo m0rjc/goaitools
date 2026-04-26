@@ -206,6 +206,8 @@ The `Chat` type provides functional options pattern for easy usage. See `example
 - Configuring the Chat API with functional options
 - Using `WithSystemMessage()`, `WithUserMessage()`, `WithTools()`, and `WithToolActionLogger()`
 
+**Observability**: Set `Chat.CompletionObserver` to a `CompletionObserver` callback to receive token usage and message count after each backend round-trip. The `usage` argument may be nil — some backends do not report token counts. See `example/observability/` for a complete example including a nil-safe observer and Prometheus-style counter comments.
+
 ## Important Patterns
 
 ### Schema Definition with `MustMarshalJSON`
