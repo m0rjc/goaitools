@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -353,7 +354,7 @@ func TestClient_ChatCompletion_Integration(t *testing.T) {
 	result, err := client.ChatCompletion(
 		context.Background(),
 		[]goaitools.Message{
-			{Role: goaitools.RoleUser, Content: "Test"},
+			client.NewUserMessage("Test"),
 		},
 		aitooling.ToolSet{},
 	)
@@ -362,12 +363,334 @@ func TestClient_ChatCompletion_Integration(t *testing.T) {
 		t.Fatalf("Expected no error, got %v", err)
 	}
 
-	if result.Message.Content != "Hello from mock server" {
-		t.Errorf("Expected mock response, got '%s'", result.Message.Content)
+	if result.Message.Content() != "Hello from mock server" {
+		t.Errorf("Expected mock response, got '%s'", result.Message.Content())
 	}
 
 	if result.FinishReason != goaitools.FinishReasonStop {
 		t.Errorf("Expected stop reason, got %s", result.FinishReason)
+	}
+}
+
+// Test: WithTemperature option sets temperature in request defaults
+func TestClientOptions_WithTemperature(t *testing.T) {
+	client, err := NewClientWithOptions("sk-test", WithTemperature(0.5))
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if temp, ok := client.requestDefaults["temperature"].(float64); !ok || temp != 0.5 {
+		t.Errorf("Expected temperature=0.5, got %v", client.requestDefaults["temperature"])
+	}
+}
+
+// Test: WithMaxTokens option sets max_tokens in request defaults
+func TestClientOptions_WithMaxTokens(t *testing.T) {
+	client, err := NewClientWithOptions("sk-test", WithMaxTokens(2048))
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if maxTokens, ok := client.requestDefaults["max_tokens"].(int); !ok || maxTokens != 2048 {
+		t.Errorf("Expected max_tokens=2048, got %v", client.requestDefaults["max_tokens"])
+	}
+}
+
+// Test: WithRequestParam sets arbitrary parameter
+func TestClientOptions_WithRequestParam(t *testing.T) {
+	client, err := NewClientWithOptions("sk-test", WithRequestParam("max_completion_tokens", 1500))
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if val, ok := client.requestDefaults["max_completion_tokens"].(int); !ok || val != 1500 {
+		t.Errorf("Expected max_completion_tokens=1500, got %v", client.requestDefaults["max_completion_tokens"])
+	}
+}
+
+// Test: WithRequestParams sets multiple parameters
+func TestClientOptions_WithRequestParams(t *testing.T) {
+	params := map[string]interface{}{
+		"temperature":            0.8,
+		"max_completion_tokens":  2000,
+		"top_p":                  0.9,
+	}
+
+	client, err := NewClientWithOptions("sk-test", WithRequestParams(params))
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if temp, ok := client.requestDefaults["temperature"].(float64); !ok || temp != 0.8 {
+		t.Errorf("Expected temperature=0.8, got %v", client.requestDefaults["temperature"])
+	}
+
+	if maxComp, ok := client.requestDefaults["max_completion_tokens"].(int); !ok || maxComp != 2000 {
+		t.Errorf("Expected max_completion_tokens=2000, got %v", client.requestDefaults["max_completion_tokens"])
+	}
+
+	if topP, ok := client.requestDefaults["top_p"].(float64); !ok || topP != 0.9 {
+		t.Errorf("Expected top_p=0.9, got %v", client.requestDefaults["top_p"])
+	}
+}
+
+// Test: Request parameters are merged into actual requests
+func TestClient_RequestParametersMerged(t *testing.T) {
+	var receivedRequest map[string]interface{}
+
+	// Create mock server that captures the request
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Capture request body
+		json.NewDecoder(r.Body).Decode(&receivedRequest)
+
+		// Return mock response
+		response := ChatCompletionResponse{
+			Choices: []Choice{
+				{
+					Message: Message{
+						Role:    "assistant",
+						Content: "Test response",
+					},
+					FinishReason: "stop",
+				},
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithOptions(
+		"sk-test",
+		WithBaseURL(server.URL),
+		WithTemperature(0.3),
+		WithMaxTokens(512),
+		WithRequestParam("max_completion_tokens", 1024),
+	)
+
+	if err != nil {
+		t.Fatalf("Expected no error creating client, got %v", err)
+	}
+
+	_, err = client.ChatCompletion(
+		context.Background(),
+		[]goaitools.Message{
+			client.NewUserMessage("Test"),
+		},
+		aitooling.ToolSet{},
+	)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Verify parameters were included in request
+	if temp, ok := receivedRequest["temperature"].(float64); !ok || temp != 0.3 {
+		t.Errorf("Expected temperature=0.3 in request, got %v", receivedRequest["temperature"])
+	}
+
+	if maxTokens, ok := receivedRequest["max_tokens"].(float64); !ok || maxTokens != 512 {
+		t.Errorf("Expected max_tokens=512 in request, got %v", receivedRequest["max_tokens"])
+	}
+
+	if maxComp, ok := receivedRequest["max_completion_tokens"].(float64); !ok || maxComp != 1024 {
+		t.Errorf("Expected max_completion_tokens=1024 in request, got %v", receivedRequest["max_completion_tokens"])
+	}
+}
+
+// Test: NewClient initializes empty requestDefaults
+func TestNewClient_InitializesRequestDefaults(t *testing.T) {
+	client, err := NewClient("sk-test")
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if client.requestDefaults == nil {
+		t.Error("Expected requestDefaults to be initialized")
+	}
+
+	if len(client.requestDefaults) != 0 {
+		t.Errorf("Expected empty requestDefaults, got %d entries", len(client.requestDefaults))
+	}
+}
+
+// Test: WithPayloadLogging option enables payload logging
+func TestClientOptions_WithPayloadLogging(t *testing.T) {
+	client, err := NewClientWithOptions("sk-test", WithPayloadLogging())
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if !client.payloadLogging {
+		t.Error("Expected payloadLogging to be true")
+	}
+}
+
+// Test: Payload logging logs request and response bodies
+func TestClient_PayloadLogging_LogsRequestAndResponse(t *testing.T) {
+	// Create a mock logger to capture debug logs
+	mockLogger := &mockSystemLogger{
+		debugLogs: make([]debugLogEntry, 0),
+	}
+
+	// Create mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return mock response
+		response := ChatCompletionResponse{
+			Choices: []Choice{
+				{
+					Message: Message{
+						Role:    "assistant",
+						Content: "Test response",
+					},
+					FinishReason: "stop",
+				},
+			},
+			Usage: Usage{
+				PromptTokens:     10,
+				CompletionTokens: 5,
+				TotalTokens:      15,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithOptions(
+		"sk-test",
+		WithBaseURL(server.URL),
+		WithSystemLogger(mockLogger),
+		WithPayloadLogging(),
+	)
+
+	if err != nil {
+		t.Fatalf("Expected no error creating client, got %v", err)
+	}
+
+	_, err = client.ChatCompletion(
+		context.Background(),
+		[]goaitools.Message{
+			client.NewUserMessage("Test message"),
+		},
+		aitooling.ToolSet{},
+	)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Verify that request body was logged
+	foundRequestLog := false
+	foundResponseLog := false
+
+	for _, entry := range mockLogger.debugLogs {
+		if entry.msg == "openai_request_body" {
+			foundRequestLog = true
+			// Verify that the body contains expected content
+			if body, ok := entry.keysAndValues[1].(string); ok {
+				if !strings.Contains(body, "Test message") {
+					t.Error("Expected request body to contain user message")
+				}
+			} else {
+				t.Error("Expected body to be a string")
+			}
+		}
+
+		if entry.msg == "openai_response_body" {
+			foundResponseLog = true
+			// Verify that the body contains expected content
+			if body, ok := entry.keysAndValues[3].(string); ok {
+				if !strings.Contains(body, "Test response") {
+					t.Error("Expected response body to contain assistant response")
+				}
+			} else {
+				t.Error("Expected body to be a string")
+			}
+		}
+	}
+
+	if !foundRequestLog {
+		t.Error("Expected request body to be logged")
+	}
+
+	if !foundResponseLog {
+		t.Error("Expected response body to be logged")
+	}
+}
+
+// Test: Without payload logging, request/response bodies are not logged
+func TestClient_WithoutPayloadLogging_DoesNotLogBodies(t *testing.T) {
+	// Create a mock logger to capture debug logs
+	mockLogger := &mockSystemLogger{
+		debugLogs: make([]debugLogEntry, 0),
+	}
+
+	// Create mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return mock response
+		response := ChatCompletionResponse{
+			Choices: []Choice{
+				{
+					Message: Message{
+						Role:    "assistant",
+						Content: "Test response",
+					},
+					FinishReason: "stop",
+				},
+			},
+			Usage: Usage{
+				PromptTokens:     10,
+				CompletionTokens: 5,
+				TotalTokens:      15,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithOptions(
+		"sk-test",
+		WithBaseURL(server.URL),
+		WithSystemLogger(mockLogger),
+		// Note: NOT using WithPayloadLogging()
+	)
+
+	if err != nil {
+		t.Fatalf("Expected no error creating client, got %v", err)
+	}
+
+	_, err = client.ChatCompletion(
+		context.Background(),
+		[]goaitools.Message{
+			client.NewUserMessage("Test message"),
+		},
+		aitooling.ToolSet{},
+	)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Verify that request/response bodies were NOT logged
+	for _, entry := range mockLogger.debugLogs {
+		if entry.msg == "openai_request_body" {
+			t.Error("Expected request body NOT to be logged without payload logging enabled")
+		}
+
+		if entry.msg == "openai_response_body" {
+			t.Error("Expected response body NOT to be logged without payload logging enabled")
+		}
 	}
 }
 
@@ -383,4 +706,34 @@ func (m *mockTool) Description() string         { return m.description }
 func (m *mockTool) Parameters() json.RawMessage { return m.parameters }
 func (m *mockTool) Execute(ctx aitooling.ToolExecuteContext, req *aitooling.ToolRequest) (*aitooling.ToolResult, error) {
 	return req.NewResult("ok"), nil
+}
+
+// mockSystemLogger for testing
+type mockSystemLogger struct {
+	debugLogs []debugLogEntry
+	infoLogs  []debugLogEntry
+	errorLogs []errorLogEntry
+}
+
+type debugLogEntry struct {
+	msg           string
+	keysAndValues []interface{}
+}
+
+type errorLogEntry struct {
+	msg           string
+	err           error
+	keysAndValues []interface{}
+}
+
+func (m *mockSystemLogger) Debug(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	m.debugLogs = append(m.debugLogs, debugLogEntry{msg: msg, keysAndValues: keysAndValues})
+}
+
+func (m *mockSystemLogger) Info(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	m.infoLogs = append(m.infoLogs, debugLogEntry{msg: msg, keysAndValues: keysAndValues})
+}
+
+func (m *mockSystemLogger) Error(ctx context.Context, msg string, err error, keysAndValues ...interface{}) {
+	m.errorLogs = append(m.errorLogs, errorLogEntry{msg: msg, err: err, keysAndValues: keysAndValues})
 }
